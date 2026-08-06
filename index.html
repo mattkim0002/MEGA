@@ -776,8 +776,66 @@ async function goplusCheckChunk(chain, chunk) {
     t.risks = goplusRisks(d);
     t.verdict = verdictFromRisks(t.risks);
     t.score = null;
+    t._gp = d; // keep full record — deep research reads holders/LP from it for free
     const hc = parseInt(d.holder_count, 10);
     if (!isNaN(hc)) t.holders = hc;
+  }
+}
+
+// Deep research for tokens that cleared the rug check: who holds the supply,
+// is the LP locked, does the creator still hold, are insiders detected.
+// Solana → RugCheck full report; EVM → the GoPlus record already fetched.
+async function researchToken(t) {
+  const num = (x) => parseFloat(x) || 0;
+  try {
+    if (t.chain === "solana") {
+      const d = await fetchJson("https://api.rugcheck.xyz/v1/tokens/" + t.mint + "/report", "RugCheck report");
+      const pts = [];
+      const known = d.knownAccounts || {};
+      const isPool = (h) => {
+        const k = known[h.address] || known[h.owner];
+        return k && (k.type === "AMM" || k.type === "LP");
+      };
+      const holders = d.totalHolders;
+      if (holders != null) pts.push({ ok: holders >= 500, text: holders.toLocaleString() + " holders" + (holders < 500 ? " — small base" : "") });
+      const th = (d.topHolders || []).filter((h) => !isPool(h));
+      const top10 = th.slice(0, 10).reduce((s, h) => s + (h.pct || 0), 0);
+      pts.push({ ok: top10 <= 30, text: "top 10 wallets hold " + top10.toFixed(1) + "% (pools excluded)" + (top10 > 30 ? " — concentrated" : "") });
+      let lpMax = 0;
+      for (const m of d.markets || []) if (m.lp && m.lp.lpLockedPct != null) lpMax = Math.max(lpMax, m.lp.lpLockedPct);
+      pts.push({ ok: lpMax >= 80, text: "LP " + lpMax.toFixed(0) + "% locked/burned (best market)" });
+      const creatorPct = (d.topHolders || [])
+        .filter((h) => h.owner === d.creator || h.address === d.creator)
+        .reduce((s, h) => s + (h.pct || 0), 0);
+      pts.push({ ok: creatorPct <= 5, text: "creator holds " + creatorPct.toFixed(1) + "% of supply" });
+      const insiders = d.graphInsidersDetected || 0;
+      pts.push({ ok: insiders === 0, text: insiders === 0 ? "no insider wallet networks detected"
+        : insiders + " insider wallets in " + (d.insiderNetworks || []).length + " network(s) — supply may be coordinated" });
+      if (d.rugged) pts.push({ ok: false, text: "RugCheck marks this token as RUGGED" });
+      if (t.holders == null && holders != null) t.holders = holders;
+      t.research = pts;
+    } else if (t._gp) {
+      const d = t._gp;
+      const pts = [];
+      const holders = parseInt(d.holder_count, 10);
+      if (!isNaN(holders)) pts.push({ ok: holders >= 500, text: holders.toLocaleString() + " holders" + (holders < 500 ? " — small base" : "") });
+      const hs = (d.holders || []).filter((h) => h.is_contract !== 1 && h.is_locked !== 1);
+      const top10 = 100 * hs.slice(0, 10).reduce((s, h) => s + num(h.percent), 0);
+      pts.push({ ok: top10 <= 30, text: "top 10 wallets hold " + top10.toFixed(1) + "% (contracts/locked excluded)" + (top10 > 30 ? " — concentrated" : "") });
+      const lpLocked = 100 * (d.lp_holders || []).reduce((s, h) => s + (h.is_locked === 1 ? num(h.percent) : 0), 0);
+      pts.push({ ok: lpLocked >= 50, text: "LP " + lpLocked.toFixed(0) + "% locked/burned" });
+      const cPct = 100 * num(d.creator_percent);
+      pts.push({ ok: cPct <= 5, text: "creator holds " + cPct.toFixed(1) + "% of supply" });
+      if (d.owner_percent != null && d.owner_percent !== "") {
+        const oPct = 100 * num(d.owner_percent);
+        pts.push({ ok: oPct <= 5, text: "owner holds " + oPct.toFixed(1) + "% of supply" });
+      }
+      t.research = pts;
+    } else {
+      t.researchError = "No research source available for this chain.";
+    }
+  } catch (e) {
+    t.researchError = describeError(e, "researching " + t.pair.symbol);
   }
 }
 
@@ -856,6 +914,7 @@ function tokenCard(t) {
           heatHtml(t) +
           trendHtml(t) +
           (t.holders != null ? '<span>Holders <b>' + t.holders.toLocaleString() + '</b></span>' : "") +
+          (t.research ? '<span>Research <b>' + t.research.filter((p) => p.ok).length + "/" + t.research.length + '</b></span>' : "") +
           (() => { const p = PHASE_BADGE[(t.runway || (t.runway = runwayAssess(t.pair))).phase];
                    return '<span class="phase ' + p.cls + '">' + p.text + '</span>'; })() +
         '</div>' +
@@ -895,7 +954,15 @@ function cardBody(t) {
   '<div class="rw">' +
     '<div class="rw-head">Engagement signals — trend score ' + tr.score + '/100</div>' +
     tr.pts.map(sigRow).join("") +
-  '</div>');
+  '</div>') +
+  (t.research ?
+  '<div class="rw">' +
+    '<div class="rw-head">Deep research — holders &amp; liquidity (' + t.research.filter((p) => p.ok).length + "/" + t.research.length + ' OK)</div>' +
+    t.research.map(sigRow).join("") +
+  '</div>'
+  : t.researchError ?
+  '<div class="rw"><div class="rw-head">Deep research</div><div class="rw-note">' + esc(t.researchError) + '</div></div>'
+  : "");
   const links = [];
   if (t.chain === "solana") {
     links.push(["RugCheck", "https://rugcheck.xyz/tokens/" + t.mint]);
@@ -1072,6 +1139,17 @@ async function runScan() {
       if (i + 1 < solanaTokens.length) await sleep(RUGCHECK_DELAY_MS);
     }
 
+    // Deep research on the tokens that cleared the rug check
+    const toResearch = filtered.filter((t) => t.verdict === "pass");
+    for (let i = 0; i < toResearch.length; i++) {
+      const t = toResearch[i];
+      setStatus("Deep research " + (i + 1) + "/" + toResearch.length + ": " + t.pair.symbol + " (holders, LP lock, insiders)…", "", true);
+      await researchToken(t);
+      rerenderCard(t, resultsEl);
+      // only RugCheck report calls need pacing; EVM research reads cached GoPlus data
+      if (t.chain === "solana" && i + 1 < toResearch.length) await sleep(RUGCHECK_DELAY_MS);
+    }
+
     const cautions = filtered.filter((t) => t.verdict === "caution").length;
     const fails = filtered.filter((t) => t.verdict === "fail").length;
     setStatus("Done" + (usedFallback ? " (via GeckoTerminal fallback)" : "") + ": " +
@@ -1131,6 +1209,10 @@ async function checkSingle() {
     singleEl.innerHTML = '<div class="section-title">Single token check</div>' + tokenCard(t);
     setStatus("Running " + (chain === "solana" ? "RugCheck" : "GoPlus") + " on " + t.pair.symbol + " (" + chain + ")…", "", true);
     await securityCheckOne(t);
+    if (t.verdict === "pass" || t.verdict === "caution") {
+      setStatus("Deep research on " + t.pair.symbol + " (holders, LP lock, insiders)…", "", true);
+      await researchToken(t);
+    }
     rerenderCard(t, singleEl);
     document.querySelector('#singleResult .card').classList.add("open");
     const badge = VERDICT_BADGE[t.verdict];
