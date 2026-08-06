@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Solana Launch Screener</title>
+<title>Memecoin Launch Screener</title>
 <style>
   :root {
     --page: #0d0d0d;
@@ -73,6 +73,18 @@
   .field label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
   .metrics .up { color: var(--good); }
   .metrics .down { color: var(--crit); }
+  .chain-chip {
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: var(--ink-2);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    vertical-align: middle;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
   .phase {
     font-size: 0.66rem;
     font-weight: 700;
@@ -249,8 +261,8 @@
 </head>
 <body>
 <header>
-  <h1>Solana Launch Screener
-    <span class="sub">DexScreener latest + boosted tokens &middot; liquidity / volume / age filters &middot; RugCheck verdicts</span>
+  <h1>Memecoin Launch Screener
+    <span class="sub">DexScreener latest + boosted tokens, all chains &middot; liquidity / volume / age filters &middot; RugCheck (Solana) + GoPlus (EVM) verdicts</span>
   </h1>
 </header>
 
@@ -294,7 +306,7 @@
 </div>
 
 <div class="single">
-  <input type="text" id="mintInput" placeholder="Paste a mint address to check a single token&hellip;" spellcheck="false">
+  <input type="text" id="mintInput" placeholder="Paste a token address (any chain) to check a single token&hellip;" spellcheck="false">
   <button class="secondary" id="checkBtn">Check</button>
 </div>
 
@@ -305,8 +317,9 @@
 
 <footer>
   Data: <a href="https://docs.dexscreener.com/api/reference" target="_blank" rel="noopener">DexScreener</a> &middot;
-  <a href="https://rugcheck.xyz" target="_blank" rel="noopener">RugCheck</a> &middot;
-  fallback: <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">GeckoTerminal</a>.
+  <a href="https://rugcheck.xyz" target="_blank" rel="noopener">RugCheck</a> (Solana) &middot;
+  <a href="https://gopluslabs.io" target="_blank" rel="noopener">GoPlus</a> (EVM/Tron) &middot;
+  fallback: <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">GeckoTerminal</a> (Solana only).
   Not financial advice &mdash; a PASS only means no automated flags, and Heat measures current
   activity (buy pressure, turnover, price action), not future performance.
 </footer>
@@ -388,7 +401,39 @@ function esc(s) {
 
 /* ---------- data sources ---------- */
 
-// Primary discovery: DexScreener token-profiles + token-boosts (Solana only)
+// Chain metadata: GoPlus chain id for security checks, explorer + GMGN links.
+// Solana is special-cased (RugCheck); chains absent here get an honest UNKNOWN.
+const CHAIN_INFO = {
+  ethereum:  { gp: "1",      explorer: "https://etherscan.io/token/",            gmgn: "eth" },
+  bsc:       { gp: "56",     explorer: "https://bscscan.com/token/",             gmgn: "bsc" },
+  base:      { gp: "8453",   explorer: "https://basescan.org/token/",            gmgn: "base" },
+  arbitrum:  { gp: "42161",  explorer: "https://arbiscan.io/token/" },
+  polygon:   { gp: "137",    explorer: "https://polygonscan.com/token/" },
+  optimism:  { gp: "10",     explorer: "https://optimistic.etherscan.io/token/" },
+  avalanche: { gp: "43114",  explorer: "https://snowtrace.io/token/" },
+  fantom:    { gp: "250",    explorer: "https://ftmscan.com/token/" },
+  cronos:    { gp: "25",     explorer: "https://cronoscan.com/token/" },
+  zksync:    { gp: "324",    explorer: "https://explorer.zksync.io/address/" },
+  linea:     { gp: "59144",  explorer: "https://lineascan.build/token/" },
+  scroll:    { gp: "534352", explorer: "https://scrollscan.com/token/" },
+  blast:     { gp: "81457",  explorer: "https://blastscan.io/token/" },
+  mantle:    { gp: "5000",   explorer: "https://mantlescan.xyz/token/" },
+  opbnb:     { gp: "204",    explorer: "https://opbnb.bscscan.com/token/" },
+  gnosis:    { gp: "100",    explorer: "https://gnosisscan.io/token/" },
+  pulsechain:{ gp: "369",    explorer: "https://scan.pulsechain.com/token/" },
+  unichain:  { gp: "130",    explorer: "https://uniscan.xyz/token/" },
+  berachain: { gp: "80094",  explorer: "https://berascan.com/token/" },
+  sonic:     { gp: "146",    explorer: "https://sonicscan.org/token/" },
+  abstract:  { gp: "2741",   explorer: "https://abscan.org/token/" },
+  soneium:   { gp: "1868",   explorer: "https://soneium.blockscout.com/token/" },
+  worldchain:{ gp: "480",    explorer: "https://worldscan.org/token/" },
+  hyperevm:  { gp: "999",    explorer: "https://hyperevmscan.io/token/" },
+  tron:      { gp: "tron",   explorer: "https://tronscan.org/#/token20/",        gmgn: "tron" },
+};
+
+const tokenKey = (chain, addr) => chain + ":" + addr.toLowerCase();
+
+// Primary discovery: DexScreener token-profiles + token-boosts (all chains)
 async function discoverTokens() {
   const [profiles, boosts] = await Promise.all([
     fetchJson("https://api.dexscreener.com/token-profiles/latest/v1", "DexScreener profiles"),
@@ -397,10 +442,11 @@ async function discoverTokens() {
   const seen = new Set();
   const tokens = [];
   for (const item of [].concat(profiles || [], boosts || [])) {
-    if (item.chainId !== "solana" || !item.tokenAddress) continue;
-    if (seen.has(item.tokenAddress)) continue;
-    seen.add(item.tokenAddress);
-    tokens.push({ mint: item.tokenAddress, boosted: item.totalAmount != null });
+    if (!item.chainId || !item.tokenAddress) continue;
+    const key = tokenKey(item.chainId, item.tokenAddress);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tokens.push({ mint: item.tokenAddress, chain: item.chainId, boosted: item.totalAmount != null });
   }
   return tokens;
 }
@@ -427,6 +473,7 @@ async function discoverViaFallback() {
       const tx = (a.transactions && a.transactions.h24) || {};
       tokens.push({
         mint,
+        chain: "solana",
         boosted: false,
         pair: {
           symbol: nameParts[0] || mint.slice(0, 6),
@@ -452,43 +499,62 @@ async function discoverViaFallback() {
   return tokens;
 }
 
-// Batch market data: DexScreener pairs, 30 mints per call; keep highest-liquidity pair per mint
-async function fetchMarketData(mints) {
-  const byMint = new Map();
-  for (let i = 0; i < mints.length; i += 30) {
-    const chunk = mints.slice(i, i + 30);
-    const pairs = await fetchJson(
-      "https://api.dexscreener.com/tokens/v1/solana/" + chunk.join(","),
-      "DexScreener pairs"
-    );
-    for (const p of pairs || []) {
-      const mint = p.baseToken && p.baseToken.address;
-      if (!mint) continue;
-      const liq = (p.liquidity && p.liquidity.usd) || 0;
-      const existing = byMint.get(mint);
-      if (existing && existing.liquidity >= liq) continue;
-      byMint.set(mint, {
-        symbol: (p.baseToken.symbol || "").trim() || mint.slice(0, 6),
-        name: p.baseToken.name || "",
-        icon: p.info && p.info.imageUrl,
-        liquidity: liq,
-        volume24: (p.volume && p.volume.h24) || 0,
-        marketCap: p.marketCap != null ? p.marketCap : null,
-        fdv: p.fdv != null ? p.fdv : null,
-        createdAt: p.pairCreatedAt || null,
-        change1h: p.priceChange && p.priceChange.h1 != null ? p.priceChange.h1 : null,
-        change6h: p.priceChange && p.priceChange.h6 != null ? p.priceChange.h6 : null,
-        change24h: p.priceChange && p.priceChange.h24 != null ? p.priceChange.h24 : null,
-        buys: p.txns && p.txns.h24 ? p.txns.h24.buys : null,
-        sells: p.txns && p.txns.h24 ? p.txns.h24.sells : null,
-        buys1h: p.txns && p.txns.h1 ? p.txns.h1.buys : null,
-        sells1h: p.txns && p.txns.h1 ? p.txns.h1.sells : null,
-        url: p.url || "https://dexscreener.com/solana/" + mint,
-      });
-    }
-    if (i + 30 < mints.length) await sleep(250);
+// Convert a DexScreener pair object to our internal pair shape
+function pairFromDex(p, fallbackChain) {
+  const mint = p.baseToken && p.baseToken.address;
+  const chain = p.chainId || fallbackChain;
+  return {
+    chain,
+    symbol: (p.baseToken.symbol || "").trim() || mint.slice(0, 6),
+    name: p.baseToken.name || "",
+    icon: p.info && p.info.imageUrl,
+    liquidity: (p.liquidity && p.liquidity.usd) || 0,
+    volume24: (p.volume && p.volume.h24) || 0,
+    marketCap: p.marketCap != null ? p.marketCap : null,
+    fdv: p.fdv != null ? p.fdv : null,
+    createdAt: p.pairCreatedAt || null,
+    change1h: p.priceChange && p.priceChange.h1 != null ? p.priceChange.h1 : null,
+    change6h: p.priceChange && p.priceChange.h6 != null ? p.priceChange.h6 : null,
+    change24h: p.priceChange && p.priceChange.h24 != null ? p.priceChange.h24 : null,
+    buys: p.txns && p.txns.h24 ? p.txns.h24.buys : null,
+    sells: p.txns && p.txns.h24 ? p.txns.h24.sells : null,
+    buys1h: p.txns && p.txns.h1 ? p.txns.h1.buys : null,
+    sells1h: p.txns && p.txns.h1 ? p.txns.h1.sells : null,
+    url: p.url || "https://dexscreener.com/" + chain + "/" + mint,
+  };
+}
+
+// Batch market data: DexScreener pairs, 30 addresses per call, grouped per
+// chain; keep the highest-liquidity pair per token.
+async function fetchMarketData(tokens) {
+  const byChain = new Map();
+  for (const t of tokens) {
+    if (!byChain.has(t.chain)) byChain.set(t.chain, []);
+    byChain.get(t.chain).push(t.mint);
   }
-  return byMint;
+  const byKey = new Map();
+  let firstCall = true;
+  for (const [chain, mints] of byChain) {
+    for (let i = 0; i < mints.length; i += 30) {
+      if (!firstCall) await sleep(250);
+      firstCall = false;
+      const chunk = mints.slice(i, i + 30);
+      const pairs = await fetchJson(
+        "https://api.dexscreener.com/tokens/v1/" + chain + "/" + chunk.join(","),
+        "DexScreener pairs"
+      );
+      for (const p of pairs || []) {
+        const mint = p.baseToken && p.baseToken.address;
+        if (!mint) continue;
+        const key = tokenKey(p.chainId || chain, mint);
+        const liq = (p.liquidity && p.liquidity.usd) || 0;
+        const existing = byKey.get(key);
+        if (existing && existing.liquidity >= liq) continue;
+        byKey.set(key, pairFromDex(p, chain));
+      }
+    }
+  }
+  return byKey;
 }
 
 /* ---------- momentum heuristic ---------- */
@@ -596,7 +662,75 @@ function pctHtml(label, v) {
   return '<span>' + label + ' <b class="' + cls + '">' + sign + v.toFixed(1) + '%</b></span>';
 }
 
-/* ---------- RugCheck ---------- */
+/* ---------- security checks: RugCheck (Solana) + GoPlus (EVM/Tron) ---------- */
+
+// Map a GoPlus token_security record to RugCheck-style {name, description, level} risks
+function goplusRisks(d) {
+  const risks = [];
+  const num = (x) => parseFloat(x) || 0;
+  const flag = (cond, level, name, description) => { if (cond) risks.push({ name, description, level }); };
+  const buyTax = num(d.buy_tax), sellTax = num(d.sell_tax);
+  const taxTxt = "Buy tax " + Math.round(buyTax * 100) + "%, sell tax " + Math.round(sellTax * 100) + "%.";
+  flag(d.is_honeypot === "1", "danger", "Honeypot", "Sell simulation fails — holders cannot sell this token.");
+  flag(d.cannot_sell_all === "1", "danger", "Cannot sell all", "Holders are blocked from selling their full balance.");
+  flag(d.transfer_pausable === "1", "danger", "Pausable transfers", "The owner can pause transfers and block sells.");
+  flag(d.is_mintable === "1", "danger", "Mintable", "The owner can mint new tokens and dilute holders.");
+  flag(d.owner_change_balance === "1", "danger", "Owner can edit balances", "The contract owner can modify holder balances.");
+  flag(d.selfdestruct === "1", "danger", "Self-destruct", "The contract contains a self-destruct function.");
+  flag(d.hidden_owner === "1", "danger", "Hidden owner", "Ownership is obscured — 'renounced' may not be real.");
+  flag(buyTax >= 0.1 || sellTax >= 0.1, "danger", "High trading tax", taxTxt);
+  flag((buyTax > 0 || sellTax > 0) && buyTax < 0.1 && sellTax < 0.1, "warn", "Trading tax", taxTxt);
+  flag(d.is_open_source === "0", "warn", "Unverified contract", "Source code is not verified — hidden logic is possible.");
+  flag(d.is_proxy === "1", "warn", "Upgradeable proxy", "Contract logic can be changed after deployment.");
+  flag(d.is_blacklisted === "1", "warn", "Blacklist function", "The owner can block specific addresses from trading.");
+  flag(d.can_take_back_ownership === "1", "warn", "Ownership reclaimable", "Renounced ownership can be taken back.");
+  flag(d.trading_cooldown === "1", "warn", "Trading cooldown", "Trades are rate-limited per address.");
+  flag(d.anti_whale_modifiable === "1", "warn", "Modifiable anti-whale", "The owner can change transaction limits.");
+  return risks;
+}
+
+const verdictFromRisks = (risks) =>
+  risks.some((r) => r.level === "danger") ? "fail" :
+  risks.some((r) => r.level === "warn") ? "caution" : "pass";
+
+// Check one GoPlus chunk (same-chain tokens); mutates each token in place
+async function goplusCheckChunk(chain, chunk) {
+  const gpId = CHAIN_INFO[chain].gp;
+  const res = await fetchJson(
+    "https://api.gopluslabs.io/api/v1/token_security/" + gpId +
+    "?contract_addresses=" + chunk.map((t) => t.mint).join(","),
+    "GoPlus"
+  );
+  for (const t of chunk) {
+    const d = res && res.result && res.result[t.mint.toLowerCase()];
+    if (!d) {
+      t.verdict = "unknown";
+      t.checkError = "GoPlus has no data for this token yet (often true for very new launches).";
+      continue;
+    }
+    t.risks = goplusRisks(d);
+    t.verdict = verdictFromRisks(t.risks);
+    t.score = null;
+  }
+}
+
+// Single-token security check, routed by chain; mutates the token
+async function securityCheckOne(t) {
+  try {
+    if (t.chain === "solana") {
+      const r = await rugcheckToken(t.mint);
+      t.verdict = r.verdict; t.risks = r.risks; t.score = r.score;
+    } else if (CHAIN_INFO[t.chain]) {
+      await goplusCheckChunk(t.chain, [t]);
+    } else {
+      t.verdict = "unknown";
+      t.checkError = 'No free security checker available for chain "' + t.chain + '" — verify manually.';
+    }
+  } catch (e) {
+    t.verdict = "unknown";
+    t.checkError = describeError(e, "checking " + t.pair.symbol);
+  }
+}
 
 async function rugcheckToken(mint) {
   const url = "https://api.rugcheck.xyz/v1/tokens/" + mint + "/report/summary";
@@ -633,12 +767,12 @@ function tokenCard(t) {
   const badge = VERDICT_BADGE[t.verdict] || VERDICT_BADGE.pending;
   const ageH = t.pair.createdAt ? (Date.now() - t.pair.createdAt) / 3.6e6 : null;
   return '' +
-    '<div class="card" id="card-' + esc(t.mint) + '">' +
+    '<div class="card" id="card-' + esc(t.chain) + '-' + esc(t.mint) + '">' +
       '<div class="card-head" data-mint="' + esc(t.mint) + '">' +
         '<div class="tok-id">' +
           (t.pair.icon ? '<img src="' + esc(t.pair.icon) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">' : "") +
           '<div class="tok-name">' +
-            '<div class="sym">' + esc(t.pair.symbol) + (t.boosted ? ' <span title="Boosted on DexScreener">⚡</span>' : "") + '</div>' +
+            '<div class="sym">' + esc(t.pair.symbol) + ' <span class="chain-chip">' + esc(t.chain) + '</span>' + (t.boosted ? ' <span title="Boosted on DexScreener">⚡</span>' : "") + '</div>' +
             '<div class="nm">' + esc(t.pair.name) + '</div>' +
           '</div>' +
         '</div>' +
@@ -668,7 +802,7 @@ function cardBody(t) {
   } else if (t.verdict === "unknown") {
     riskHtml = '<div class="risk"><span class="desc">' + esc(t.checkError || "RugCheck unavailable for this token.") + '</span></div>';
   } else if (!t.risks || t.risks.length === 0) {
-    riskHtml = '<div class="norisks">✓ No risks flagged by RugCheck' +
+    riskHtml = '<div class="norisks">✓ No risks flagged by ' + (t.chain === "solana" ? "RugCheck" : "GoPlus") +
       (t.score != null ? ' (score ' + t.score + '/100, lower is safer)' : '') + '</div>';
   } else {
     riskHtml = t.risks.map((r) =>
@@ -686,18 +820,27 @@ function cardBody(t) {
       '<span class="desc">' + esc(p.text) + '</span></div>').join("") +
     '<div class="rw-note">' + esc(rw.note) + '</div>' +
   '</div>';
+  const links = [];
+  if (t.chain === "solana") {
+    links.push(["RugCheck", "https://rugcheck.xyz/tokens/" + t.mint]);
+    links.push(["GMGN", "https://gmgn.ai/sol/token/" + t.mint]);
+    links.push(["Solscan", "https://solscan.io/token/" + t.mint]);
+  } else {
+    const ci = CHAIN_INFO[t.chain];
+    if (ci) links.push(["GoPlus", "https://gopluslabs.io/token-security/" + ci.gp + "/" + t.mint]);
+    if (ci && ci.gmgn) links.push(["GMGN", "https://gmgn.ai/" + ci.gmgn + "/token/" + t.mint]);
+    if (ci && ci.explorer) links.push(["Explorer", ci.explorer + t.mint]);
+  }
+  links.push(["DexScreener", t.pair.url]);
   return rwHtml + riskHtml +
-    '<div class="mint-line">Mint: ' + esc(t.mint) + '</div>' +
+    '<div class="mint-line">Address (' + esc(t.chain) + '): ' + esc(t.mint) + '</div>' +
     '<div class="links">' +
-      '<a target="_blank" rel="noopener" href="https://rugcheck.xyz/tokens/' + esc(t.mint) + '">RugCheck</a>' +
-      '<a target="_blank" rel="noopener" href="https://gmgn.ai/sol/token/' + esc(t.mint) + '">GMGN</a>' +
-      '<a target="_blank" rel="noopener" href="https://solscan.io/token/' + esc(t.mint) + '">Solscan</a>' +
-      '<a target="_blank" rel="noopener" href="' + esc(t.pair.url) + '">DexScreener</a>' +
+      links.map((l) => '<a target="_blank" rel="noopener" href="' + esc(l[1]) + '">' + esc(l[0]) + '</a>').join("") +
     '</div>';
 }
 
 function rerenderCard(t, container) {
-  const old = (container || document).querySelector('[id="card-' + CSS.escape(t.mint) + '"]');
+  const old = (container || document).querySelector('[id="card-' + CSS.escape(t.chain + "-" + t.mint) + '"]');
   if (!old) return;
   const wasOpen = old.classList.contains("open");
   const wrap = document.createElement("div");
@@ -735,7 +878,7 @@ async function runScan() {
     try {
       tokens = await discoverTokens();
     } catch (e) {
-      setStatus(describeError(e, "discovering tokens") + " Trying fallback source (GeckoTerminal)…", "warn", true);
+      setStatus(describeError(e, "discovering tokens") + " Trying fallback source (GeckoTerminal, Solana only)…", "warn", true);
       await sleep(600);
       tokens = await discoverViaFallback();
       usedFallback = true;
@@ -752,10 +895,10 @@ async function runScan() {
       withPairs = tokens; // fallback source already includes pool data
     } else {
       setStatus("Fetched " + tokens.length + " tokens. Loading market data…", "", true);
-      const market = await fetchMarketData(tokens.map((t) => t.mint));
+      const market = await fetchMarketData(tokens);
       withPairs = tokens
-        .filter((t) => market.has(t.mint))
-        .map((t) => ({ ...t, pair: market.get(t.mint) }));
+        .filter((t) => market.has(tokenKey(t.chain, t.mint)))
+        .map((t) => ({ ...t, pair: market.get(tokenKey(t.chain, t.mint)) }));
     }
     setFunnel(tokens.length, withPairs.length, null, null);
 
@@ -794,24 +937,59 @@ async function runScan() {
     for (const t of filtered) t.verdict = "pending";
     resultsEl.innerHTML = filtered.map(tokenCard).join("");
 
+    // Route security checks by chain: Solana → RugCheck (sequential, paced);
+    // GoPlus-supported chains → one batched call per chunk; others → UNKNOWN.
     let passed = 0, done = 0;
+    const finish = (t) => {
+      if (t.verdict === "pass") passed++;
+      rerenderCard(t, resultsEl);
+      done++;
+      setFunnel(tokens.length, withPairs.length, filtered.length + truncated, passed);
+    };
+    const solanaTokens = filtered.filter((t) => t.chain === "solana");
+    const goplusByChain = new Map();
     for (const t of filtered) {
-      setStatus("RugCheck " + (done + 1) + "/" + filtered.length + ": " + t.pair.symbol + "…" +
+      if (t.chain === "solana") continue;
+      if (CHAIN_INFO[t.chain]) {
+        if (!goplusByChain.has(t.chain)) goplusByChain.set(t.chain, []);
+        goplusByChain.get(t.chain).push(t);
+      } else {
+        t.verdict = "unknown";
+        t.checkError = 'No free security checker available for chain "' + t.chain + '" — verify manually.';
+        finish(t);
+      }
+    }
+    for (const [chain, list] of goplusByChain) {
+      for (let i = 0; i < list.length; i += 20) {
+        const chunk = list.slice(i, i + 20);
+        setStatus("GoPlus check (" + chain + "): " + chunk.length + " tokens…", "", true);
+        try {
+          await goplusCheckChunk(chain, chunk);
+        } catch (e) {
+          for (const t of chunk) {
+            t.verdict = "unknown";
+            t.checkError = describeError(e, "checking " + t.pair.symbol);
+          }
+        }
+        chunk.forEach(finish);
+        await sleep(400);
+      }
+    }
+    for (let i = 0; i < solanaTokens.length; i++) {
+      const t = solanaTokens[i];
+      setStatus("RugCheck " + (i + 1) + "/" + solanaTokens.length + ": " + t.pair.symbol + "…" +
         (truncated ? " (checking top " + MAX_RUGCHECKS + " by current sort; " + truncated + " more met filters)" : ""), "", true);
       try {
         const r = await rugcheckToken(t.mint);
         t.verdict = r.verdict;
         t.risks = r.risks;
         t.score = r.score;
-        if (r.verdict === "pass") passed++;
       } catch (e) {
         t.verdict = "unknown";
         t.checkError = describeError(e, "checking " + t.pair.symbol);
       }
-      rerenderCard(t, resultsEl);
-      done++;
-      setFunnel(tokens.length, withPairs.length, filtered.length + truncated, passed);
-      if (done < filtered.length) await sleep(RUGCHECK_DELAY_MS);
+      finish(t);
+      if (i + 1 < solanaTokens.length) await sleep(RUGCHECK_DELAY_MS);
     }
 
     const cautions = filtered.filter((t) => t.verdict === "caution").length;
@@ -831,45 +1009,52 @@ async function runScan() {
 
 async function checkSingle() {
   const mint = $("mintInput").value.trim();
-  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
-    setStatus("That doesn't look like a Solana mint address (base58, 32–44 chars).", "error");
+  const isEvm = /^0x[0-9a-fA-F]{40}$/.test(mint);
+  const isBase58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint);
+  if (!isEvm && !isBase58) {
+    setStatus("That doesn't look like a token address (0x… for EVM chains, base58 for Solana).", "error");
     return;
   }
   $("checkBtn").disabled = true;
   try {
-    setStatus("Loading market data for " + mint.slice(0, 8) + "……", "", true);
+    setStatus("Looking up " + mint.slice(0, 10) + "… across chains…", "", true);
     let pair = null;
     try {
-      const market = await fetchMarketData([mint]);
-      pair = market.get(mint) || null;
+      // Chain-agnostic lookup: returns this token's pairs on every chain
+      const data = await fetchJson("https://api.dexscreener.com/latest/dex/tokens/" + mint, "DexScreener");
+      let best = null;
+      for (const p of (data && data.pairs) || []) {
+        if (!p.baseToken || p.baseToken.address.toLowerCase() !== mint.toLowerCase()) continue;
+        const liq = (p.liquidity && p.liquidity.usd) || 0;
+        if (!best || liq > ((best.liquidity && best.liquidity.usd) || 0)) best = p;
+      }
+      if (best) pair = pairFromDex(best, best.chainId);
     } catch (e) {
-      setStatus(describeError(e, "loading market data") + " Continuing with RugCheck only…", "warn", true);
+      setStatus(describeError(e, "loading market data") + " Continuing with security check only…", "warn", true);
+    }
+    const chain = pair ? pair.chain : (isBase58 ? "solana" : null);
+    if (!chain) {
+      setStatus("No live pair found for that address on any chain, so the chain can't be detected — EVM security check needs a live pair.", "error");
+      return;
     }
     const t = {
       mint,
+      chain,
       boosted: false,
       verdict: "pending",
       pair: pair || {
-        symbol: mint.slice(0, 6) + "…", name: "(no live DexScreener pair found)",
+        chain, symbol: mint.slice(0, 6) + "…", name: "(no live DexScreener pair found)",
         icon: null, liquidity: NaN, volume24: NaN, marketCap: null, fdv: null,
-        createdAt: null, url: "https://dexscreener.com/solana/" + mint,
+        createdAt: null, url: "https://dexscreener.com/" + chain + "/" + mint,
       },
     };
     singleEl.innerHTML = '<div class="section-title">Single token check</div>' + tokenCard(t);
-    setStatus("Running RugCheck on " + t.pair.symbol + "…", "", true);
-    try {
-      const r = await rugcheckToken(mint);
-      t.verdict = r.verdict;
-      t.risks = r.risks;
-      t.score = r.score;
-    } catch (e) {
-      t.verdict = "unknown";
-      t.checkError = describeError(e, "checking token");
-    }
+    setStatus("Running " + (chain === "solana" ? "RugCheck" : "GoPlus") + " on " + t.pair.symbol + " (" + chain + ")…", "", true);
+    await securityCheckOne(t);
     rerenderCard(t, singleEl);
     document.querySelector('#singleResult .card').classList.add("open");
     const badge = VERDICT_BADGE[t.verdict];
-    setStatus("Single check done: " + t.pair.symbol + " → " + badge.text.replace(/^\S+\s/, ""), t.verdict === "fail" ? "error" : t.verdict === "caution" ? "warn" : "");
+    setStatus("Single check done: " + t.pair.symbol + " (" + chain + ") → " + badge.text.replace(/^\S+\s/, ""), t.verdict === "fail" ? "error" : t.verdict === "caution" ? "warn" : "");
   } finally {
     $("checkBtn").disabled = false;
   }
