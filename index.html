@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solana Launch Screener</title>
+<style>
+  :root {
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #232322;
+    --border: #33332f;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --good: #0ca30c;
+    --warn: #fab219;
+    --crit: #d03b3b;
+    --accent: #7aa2f7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.45;
+    padding: 16px;
+    max-width: 980px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.25rem; font-weight: 700; }
+  h1 .sub { display: block; font-size: 0.8rem; font-weight: 400; color: var(--muted); margin-top: 2px; }
+  header { margin-bottom: 14px; }
+
+  /* Funnel stat tiles */
+  .funnel {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    position: relative;
+  }
+  .tile .label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .tile .value { font-size: 1.45rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink); }
+  .tile:not(:first-child)::before {
+    content: "\2192";
+    position: absolute;
+    left: -9px; top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+    font-size: 0.7rem;
+  }
+
+  /* Controls */
+  .controls {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: flex-end;
+  }
+  .field { display: flex; flex-direction: column; gap: 3px; flex: 1 1 120px; min-width: 110px; }
+  .field label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  input[type="number"], input[type="text"] {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--ink);
+    padding: 8px 10px;
+    font-size: 0.9rem;
+    width: 100%;
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button {
+    background: var(--accent);
+    color: #0d0d0d;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 18px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    flex: 0 0 auto;
+  }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.secondary { background: var(--surface-2); color: var(--ink); border: 1px solid var(--border); }
+
+  /* Single-token check */
+  .single {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .single input { flex: 1 1 260px; }
+
+  /* Status line */
+  #status {
+    font-size: 0.82rem;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-variant-numeric: tabular-nums;
+  }
+  #status.error { color: var(--crit); border-color: var(--crit); }
+  #status.warn { color: var(--warn); }
+  .spinner {
+    width: 12px; height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex: 0 0 auto;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Token cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+  .card-head {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px 10px;
+    padding: 10px 12px;
+    cursor: pointer;
+    align-items: center;
+  }
+  .card-head:hover { background: var(--surface-2); }
+  .tok-id { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .tok-id img { width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2); flex: 0 0 auto; }
+  .tok-name { min-width: 0; }
+  .tok-name .sym { font-weight: 700; font-size: 0.95rem; }
+  .tok-name .nm { color: var(--muted); font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+  .metrics {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    font-size: 0.75rem;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .metrics b { color: var(--ink); font-weight: 600; }
+  .verdict {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid;
+    white-space: nowrap;
+    letter-spacing: 0.03em;
+  }
+  .verdict.pass { color: var(--good); border-color: var(--good); }
+  .verdict.caution { color: var(--warn); border-color: var(--warn); }
+  .verdict.fail { color: var(--crit); border-color: var(--crit); }
+  .verdict.pending, .verdict.unknown { color: var(--muted); border-color: var(--border); }
+
+  .card-body {
+    display: none;
+    border-top: 1px solid var(--border);
+    padding: 10px 12px;
+    font-size: 0.82rem;
+  }
+  .card.open .card-body { display: block; }
+  .risk { display: flex; gap: 8px; padding: 4px 0; align-items: baseline; }
+  .risk .lvl { font-weight: 700; font-size: 0.7rem; flex: 0 0 58px; }
+  .risk .lvl.danger { color: var(--crit); }
+  .risk .lvl.warn { color: var(--warn); }
+  .risk .lvl.info { color: var(--muted); }
+  .risk .desc { color: var(--muted); }
+  .risk .rname { color: var(--ink-2); font-weight: 600; }
+  .norisks { color: var(--good); padding: 4px 0; }
+  .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .links a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.78rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    background: var(--surface-2);
+  }
+  .links a:hover { border-color: var(--accent); }
+  .mint-line { color: var(--muted); font-size: 0.72rem; word-break: break-all; margin-top: 8px; }
+
+  .section-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 16px 0 8px; }
+  footer { color: var(--muted); font-size: 0.7rem; margin-top: 24px; text-align: center; }
+  footer a { color: var(--muted); }
+
+  @media (max-width: 560px) {
+    body { padding: 10px; }
+    .funnel { grid-template-columns: repeat(2, 1fr); }
+    .tile:not(:first-child)::before { content: none; }
+    .tile .value { font-size: 1.2rem; }
+    .tok-name .nm { max-width: 140px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Solana Launch Screener
+    <span class="sub">DexScreener latest + boosted tokens &middot; liquidity / volume / age filters &middot; RugCheck verdicts</span>
+  </h1>
+</header>
+
+<div class="funnel" aria-label="Scan funnel">
+  <div class="tile"><div class="label">Fetched</div><div class="value" id="f-fetched">&ndash;</div></div>
+  <div class="tile"><div class="label">Live pairs</div><div class="value" id="f-live">&ndash;</div></div>
+  <div class="tile"><div class="label">Met filters</div><div class="value" id="f-filtered">&ndash;</div></div>
+  <div class="tile"><div class="label">Passed</div><div class="value" id="f-passed">&ndash;</div></div>
+</div>
+
+<div class="controls">
+  <div class="field">
+    <label for="minLiq">Min liquidity ($)</label>
+    <input type="number" id="minLiq" value="10000" min="0" step="1000">
+  </div>
+  <div class="field">
+    <label for="minVol">Min 24h volume ($)</label>
+    <input type="number" id="minVol" value="10000" min="0" step="1000">
+  </div>
+  <div class="field">
+    <label for="maxAge">Max age (hours)</label>
+    <input type="number" id="maxAge" value="72" min="1" step="1">
+  </div>
+  <button id="scanBtn">Scan</button>
+</div>
+
+<div class="single">
+  <input type="text" id="mintInput" placeholder="Paste a mint address to check a single token&hellip;" spellcheck="false">
+  <button class="secondary" id="checkBtn">Check</button>
+</div>
+
+<div id="status">Ready. Press Scan to fetch the latest launches.</div>
+
+<div id="singleResult"></div>
+<div id="results"></div>
+
+<footer>
+  Data: <a href="https://docs.dexscreener.com/api/reference" target="_blank" rel="noopener">DexScreener</a> &middot;
+  <a href="https://rugcheck.xyz" target="_blank" rel="noopener">RugCheck</a> &middot;
+  fallback: <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">GeckoTerminal</a>.
+  Not financial advice &mdash; a PASS only means no automated flags.
+</footer>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+const resultsEl = $("results");
+const singleEl = $("singleResult");
+const RUGCHECK_DELAY_MS = 900;
+const MAX_RUGCHECKS = 25;
+
+let scanning = false;
+
+/* ---------- fetch layer with error classification ---------- */
+
+class RateLimitError extends Error {
+  constructor(source) { super(source + " returned HTTP 429 (rate limited)"); this.source = source; }
+}
+class HttpError extends Error {
+  constructor(source, code) { super(source + " returned HTTP " + code); this.source = source; this.code = code; }
+}
+class NetworkError extends Error {
+  constructor(source) { super(source + " unreachable (CORS or network failure)"); this.source = source; }
+}
+
+async function fetchJson(url, source) {
+  let res;
+  try {
+    res = await fetch(url, { headers: { "Accept": "application/json" } });
+  } catch (e) {
+    // fetch() rejects with TypeError on CORS blocks and network failures
+    throw new NetworkError(source);
+  }
+  if (res.status === 429) throw new RateLimitError(source);
+  if (!res.ok) throw new HttpError(source, res.status);
+  return res.json();
+}
+
+function describeError(e, context) {
+  if (e instanceof RateLimitError)
+    return "Rate limited (HTTP 429) by " + e.source + (context ? " while " + context : "") + ". Wait a minute and try again — the API throttles per IP.";
+  if (e instanceof NetworkError)
+    return "Could not reach " + e.source + (context ? " while " + context : "") + " — CORS block or network failure. Check your connection / ad-blocker.";
+  if (e instanceof HttpError)
+    return e.source + " error (HTTP " + e.code + ")" + (context ? " while " + context : "") + ".";
+  return "Unexpected error" + (context ? " while " + context : "") + ": " + e.message;
+}
+
+function setStatus(msg, cls, busy) {
+  statusEl.className = cls || "";
+  statusEl.innerHTML = (busy ? '<span class="spinner"></span>' : "") + "<span></span>";
+  statusEl.lastChild.textContent = msg;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* ---------- formatting ---------- */
+
+function fmtUsd(n) {
+  if (n == null || isNaN(n)) return "–";
+  if (n >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
+  if (n >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
+  if (n >= 1e3) return "$" + (n / 1e3).toFixed(1) + "K";
+  return "$" + n.toFixed(0);
+}
+function fmtAge(hours) {
+  if (hours == null || isNaN(hours)) return "–";
+  if (hours < 1) return Math.round(hours * 60) + "m";
+  if (hours < 48) return hours.toFixed(1) + "h";
+  return (hours / 24).toFixed(1) + "d";
+}
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* ---------- data sources ---------- */
+
+// Primary discovery: DexScreener token-profiles + token-boosts (Solana only)
+async function discoverTokens() {
+  const [profiles, boosts] = await Promise.all([
+    fetchJson("https://api.dexscreener.com/token-profiles/latest/v1", "DexScreener profiles"),
+    fetchJson("https://api.dexscreener.com/token-boosts/latest/v1", "DexScreener boosts"),
+  ]);
+  const seen = new Set();
+  const tokens = [];
+  for (const item of [].concat(profiles || [], boosts || [])) {
+    if (item.chainId !== "solana" || !item.tokenAddress) continue;
+    if (seen.has(item.tokenAddress)) continue;
+    seen.add(item.tokenAddress);
+    tokens.push({ mint: item.tokenAddress, boosted: item.totalAmount != null });
+  }
+  return tokens;
+}
+
+// Fallback discovery + market data in one: GeckoTerminal new Solana pools
+async function discoverViaFallback() {
+  const tokens = [];
+  const seen = new Set();
+  for (let page = 1; page <= 2; page++) {
+    const data = await fetchJson(
+      "https://api.geckoterminal.com/api/v2/networks/solana/new_pools?page=" + page,
+      "GeckoTerminal (fallback)"
+    );
+    for (const pool of (data && data.data) || []) {
+      const a = pool.attributes || {};
+      const rel = pool.relationships || {};
+      const baseId = rel.base_token && rel.base_token.data && rel.base_token.data.id;
+      if (!baseId) continue;
+      const mint = baseId.replace(/^solana_/, "");
+      if (seen.has(mint)) continue;
+      seen.add(mint);
+      const nameParts = (a.name || "").split(" / ");
+      tokens.push({
+        mint,
+        boosted: false,
+        pair: {
+          symbol: nameParts[0] || mint.slice(0, 6),
+          name: a.name || "",
+          icon: null,
+          liquidity: parseFloat(a.reserve_in_usd),
+          volume24: a.volume_usd ? parseFloat(a.volume_usd.h24) : NaN,
+          marketCap: a.market_cap_usd != null ? parseFloat(a.market_cap_usd) : null,
+          fdv: a.fdv_usd != null ? parseFloat(a.fdv_usd) : null,
+          createdAt: a.pool_created_at ? Date.parse(a.pool_created_at) : null,
+          url: "https://www.geckoterminal.com/solana/pools/" + a.address,
+        },
+      });
+    }
+  }
+  return tokens;
+}
+
+// Batch market data: DexScreener pairs, 30 mints per call; keep highest-liquidity pair per mint
+async function fetchMarketData(mints) {
+  const byMint = new Map();
+  for (let i = 0; i < mints.length; i += 30) {
+    const chunk = mints.slice(i, i + 30);
+    const pairs = await fetchJson(
+      "https://api.dexscreener.com/tokens/v1/solana/" + chunk.join(","),
+      "DexScreener pairs"
+    );
+    for (const p of pairs || []) {
+      const mint = p.baseToken && p.baseToken.address;
+      if (!mint) continue;
+      const liq = (p.liquidity && p.liquidity.usd) || 0;
+      const existing = byMint.get(mint);
+      if (existing && existing.liquidity >= liq) continue;
+      byMint.set(mint, {
+        symbol: (p.baseToken.symbol || "").trim() || mint.slice(0, 6),
+        name: p.baseToken.name || "",
+        icon: p.info && p.info.imageUrl,
+        liquidity: liq,
+        volume24: (p.volume && p.volume.h24) || 0,
+        marketCap: p.marketCap != null ? p.marketCap : null,
+        fdv: p.fdv != null ? p.fdv : null,
+        createdAt: p.pairCreatedAt || null,
+        url: p.url || "https://dexscreener.com/solana/" + mint,
+      });
+    }
+    if (i + 30 < mints.length) await sleep(250);
+  }
+  return byMint;
+}
+
+/* ---------- RugCheck ---------- */
+
+async function rugcheckToken(mint) {
+  const url = "https://api.rugcheck.xyz/v1/tokens/" + mint + "/report/summary";
+  let summary;
+  try {
+    summary = await fetchJson(url, "RugCheck");
+  } catch (e) {
+    if (e instanceof RateLimitError) {
+      // one retry after a longer backoff
+      await sleep(5000);
+      summary = await fetchJson(url, "RugCheck");
+    } else {
+      throw e;
+    }
+  }
+  const risks = (summary && summary.risks) || [];
+  let verdict = "pass";
+  if (risks.some((r) => r.level === "danger")) verdict = "fail";
+  else if (risks.some((r) => r.level === "warn")) verdict = "caution";
+  return { verdict, risks, score: summary && summary.score_normalised };
+}
+
+const VERDICT_BADGE = {
+  pass:    { cls: "pass",    text: "✓ PASS" },
+  caution: { cls: "caution", text: "⚠ CAUTION" },
+  fail:    { cls: "fail",    text: "✕ FAIL" },
+  pending: { cls: "pending", text: "… CHECKING" },
+  unknown: { cls: "unknown", text: "? UNKNOWN" },
+};
+
+/* ---------- rendering ---------- */
+
+function tokenCard(t) {
+  const badge = VERDICT_BADGE[t.verdict] || VERDICT_BADGE.pending;
+  const ageH = t.pair.createdAt ? (Date.now() - t.pair.createdAt) / 3.6e6 : null;
+  return '' +
+    '<div class="card" id="card-' + esc(t.mint) + '">' +
+      '<div class="card-head" data-mint="' + esc(t.mint) + '">' +
+        '<div class="tok-id">' +
+          (t.pair.icon ? '<img src="' + esc(t.pair.icon) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">' : "") +
+          '<div class="tok-name">' +
+            '<div class="sym">' + esc(t.pair.symbol) + (t.boosted ? ' <span title="Boosted on DexScreener">⚡</span>' : "") + '</div>' +
+            '<div class="nm">' + esc(t.pair.name) + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<span class="verdict ' + badge.cls + '">' + badge.text + '</span>' +
+        '<div class="metrics">' +
+          '<span>Liq <b>' + fmtUsd(t.pair.liquidity) + '</b></span>' +
+          '<span>Vol24h <b>' + fmtUsd(t.pair.volume24) + '</b></span>' +
+          '<span>MCap <b>' + fmtUsd(t.pair.marketCap != null ? t.pair.marketCap : t.pair.fdv) + '</b></span>' +
+          '<span>FDV <b>' + fmtUsd(t.pair.fdv) + '</b></span>' +
+          '<span>Age <b>' + fmtAge(ageH) + '</b></span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="card-body">' + cardBody(t) + '</div>' +
+    '</div>';
+}
+
+function cardBody(t) {
+  let riskHtml;
+  if (t.verdict === "pending") {
+    riskHtml = '<div class="risk"><span class="desc">RugCheck pending…</span></div>';
+  } else if (t.verdict === "unknown") {
+    riskHtml = '<div class="risk"><span class="desc">' + esc(t.checkError || "RugCheck unavailable for this token.") + '</span></div>';
+  } else if (!t.risks || t.risks.length === 0) {
+    riskHtml = '<div class="norisks">✓ No risks flagged by RugCheck' +
+      (t.score != null ? ' (score ' + t.score + '/100, lower is safer)' : '') + '</div>';
+  } else {
+    riskHtml = t.risks.map((r) =>
+      '<div class="risk">' +
+        '<span class="lvl ' + esc(r.level || "info") + '">' + esc((r.level || "info").toUpperCase()) + '</span>' +
+        '<span><span class="rname">' + esc(r.name) + '</span> &mdash; <span class="desc">' + esc(r.description || "") + '</span></span>' +
+      '</div>').join("");
+    if (t.score != null) riskHtml += '<div class="risk"><span class="desc">RugCheck risk score: ' + t.score + '/100 (lower is safer)</span></div>';
+  }
+  return riskHtml +
+    '<div class="mint-line">Mint: ' + esc(t.mint) + '</div>' +
+    '<div class="links">' +
+      '<a target="_blank" rel="noopener" href="https://rugcheck.xyz/tokens/' + esc(t.mint) + '">RugCheck</a>' +
+      '<a target="_blank" rel="noopener" href="https://gmgn.ai/sol/token/' + esc(t.mint) + '">GMGN</a>' +
+      '<a target="_blank" rel="noopener" href="https://solscan.io/token/' + esc(t.mint) + '">Solscan</a>' +
+      '<a target="_blank" rel="noopener" href="' + esc(t.pair.url) + '">DexScreener</a>' +
+    '</div>';
+}
+
+function rerenderCard(t, container) {
+  const old = (container || document).querySelector('[id="card-' + CSS.escape(t.mint) + '"]');
+  if (!old) return;
+  const wasOpen = old.classList.contains("open");
+  const wrap = document.createElement("div");
+  wrap.innerHTML = tokenCard(t);
+  const fresh = wrap.firstChild;
+  if (wasOpen) fresh.classList.add("open");
+  old.replaceWith(fresh);
+}
+
+document.addEventListener("click", (e) => {
+  const head = e.target.closest(".card-head");
+  if (head && !e.target.closest("a")) head.parentElement.classList.toggle("open");
+});
+
+function setFunnel(fetched, live, filtered, passed) {
+  $("f-fetched").textContent = fetched == null ? "–" : fetched;
+  $("f-live").textContent = live == null ? "–" : live;
+  $("f-filtered").textContent = filtered == null ? "–" : filtered;
+  $("f-passed").textContent = passed == null ? "–" : passed;
+}
+
+/* ---------- main scan flow ---------- */
+
+async function runScan() {
+  if (scanning) return;
+  scanning = true;
+  $("scanBtn").disabled = true;
+  resultsEl.innerHTML = "";
+  setFunnel(null, null, null, null);
+
+  try {
+    // 1. Discover tokens
+    setStatus("Fetching latest + boosted Solana tokens from DexScreener…", "", true);
+    let tokens, usedFallback = false;
+    try {
+      tokens = await discoverTokens();
+    } catch (e) {
+      setStatus(describeError(e, "discovering tokens") + " Trying fallback source (GeckoTerminal)…", "warn", true);
+      await sleep(600);
+      tokens = await discoverViaFallback();
+      usedFallback = true;
+    }
+    setFunnel(tokens.length, null, null, null);
+    if (tokens.length === 0) {
+      setStatus("No Solana tokens in the latest DexScreener feed right now. Try again shortly.", "warn");
+      return;
+    }
+
+    // 2. Market data
+    let withPairs;
+    if (usedFallback) {
+      withPairs = tokens; // fallback source already includes pool data
+    } else {
+      setStatus("Fetched " + tokens.length + " tokens. Loading market data…", "", true);
+      const market = await fetchMarketData(tokens.map((t) => t.mint));
+      withPairs = tokens
+        .filter((t) => market.has(t.mint))
+        .map((t) => ({ ...t, pair: market.get(t.mint) }));
+    }
+    setFunnel(tokens.length, withPairs.length, null, null);
+
+    // 3. Filters
+    const minLiq = parseFloat($("minLiq").value) || 0;
+    const minVol = parseFloat($("minVol").value) || 0;
+    const maxAgeH = parseFloat($("maxAge").value) || Infinity;
+    const now = Date.now();
+    let filtered = withPairs.filter((t) => {
+      const ageH = t.pair.createdAt ? (now - t.pair.createdAt) / 3.6e6 : Infinity;
+      return t.pair.liquidity >= minLiq && t.pair.volume24 >= minVol && ageH <= maxAgeH;
+    });
+    filtered.sort((a, b) => b.pair.volume24 - a.pair.volume24);
+    let truncated = 0;
+    if (filtered.length > MAX_RUGCHECKS) {
+      truncated = filtered.length - MAX_RUGCHECKS;
+      filtered = filtered.slice(0, MAX_RUGCHECKS);
+    }
+    setFunnel(tokens.length, withPairs.length, filtered.length + truncated, null);
+
+    if (filtered.length === 0) {
+      setStatus("No tokens met the filters (liq ≥ " + fmtUsd(minLiq) + ", vol ≥ " + fmtUsd(minVol) + ", age ≤ " + maxAgeH + "h). Loosen them and re-scan.", "warn");
+      return;
+    }
+
+    // 4. Render pending cards, then RugCheck sequentially
+    for (const t of filtered) t.verdict = "pending";
+    resultsEl.innerHTML = filtered.map(tokenCard).join("");
+
+    let passed = 0, done = 0;
+    for (const t of filtered) {
+      setStatus("RugCheck " + (done + 1) + "/" + filtered.length + ": " + t.pair.symbol + "…" +
+        (truncated ? " (checking top " + MAX_RUGCHECKS + " by volume; " + truncated + " more met filters)" : ""), "", true);
+      try {
+        const r = await rugcheckToken(t.mint);
+        t.verdict = r.verdict;
+        t.risks = r.risks;
+        t.score = r.score;
+        if (r.verdict === "pass") passed++;
+      } catch (e) {
+        t.verdict = "unknown";
+        t.checkError = describeError(e, "checking " + t.pair.symbol);
+      }
+      rerenderCard(t, resultsEl);
+      done++;
+      setFunnel(tokens.length, withPairs.length, filtered.length + truncated, passed);
+      if (done < filtered.length) await sleep(RUGCHECK_DELAY_MS);
+    }
+
+    const cautions = filtered.filter((t) => t.verdict === "caution").length;
+    const fails = filtered.filter((t) => t.verdict === "fail").length;
+    setStatus("Done" + (usedFallback ? " (via GeckoTerminal fallback)" : "") + ": " +
+      passed + " passed, " + cautions + " caution, " + fails + " failed" +
+      (truncated ? " — top " + MAX_RUGCHECKS + " by volume checked, " + truncated + " more met filters" : "") + ".");
+  } catch (e) {
+    setStatus(describeError(e, "scanning"), "error");
+  } finally {
+    scanning = false;
+    $("scanBtn").disabled = false;
+  }
+}
+
+/* ---------- single token check ---------- */
+
+async function checkSingle() {
+  const mint = $("mintInput").value.trim();
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
+    setStatus("That doesn't look like a Solana mint address (base58, 32–44 chars).", "error");
+    return;
+  }
+  $("checkBtn").disabled = true;
+  try {
+    setStatus("Loading market data for " + mint.slice(0, 8) + "……", "", true);
+    let pair = null;
+    try {
+      const market = await fetchMarketData([mint]);
+      pair = market.get(mint) || null;
+    } catch (e) {
+      setStatus(describeError(e, "loading market data") + " Continuing with RugCheck only…", "warn", true);
+    }
+    const t = {
+      mint,
+      boosted: false,
+      verdict: "pending",
+      pair: pair || {
+        symbol: mint.slice(0, 6) + "…", name: "(no live DexScreener pair found)",
+        icon: null, liquidity: NaN, volume24: NaN, marketCap: null, fdv: null,
+        createdAt: null, url: "https://dexscreener.com/solana/" + mint,
+      },
+    };
+    singleEl.innerHTML = '<div class="section-title">Single token check</div>' + tokenCard(t);
+    setStatus("Running RugCheck on " + t.pair.symbol + "…", "", true);
+    try {
+      const r = await rugcheckToken(mint);
+      t.verdict = r.verdict;
+      t.risks = r.risks;
+      t.score = r.score;
+    } catch (e) {
+      t.verdict = "unknown";
+      t.checkError = describeError(e, "checking token");
+    }
+    rerenderCard(t, singleEl);
+    document.querySelector('#singleResult .card').classList.add("open");
+    const badge = VERDICT_BADGE[t.verdict];
+    setStatus("Single check done: " + t.pair.symbol + " → " + badge.text.replace(/^\S+\s/, ""), t.verdict === "fail" ? "error" : t.verdict === "caution" ? "warn" : "");
+  } finally {
+    $("checkBtn").disabled = false;
+  }
+}
+
+$("scanBtn").addEventListener("click", runScan);
+$("checkBtn").addEventListener("click", checkSingle);
+$("mintInput").addEventListener("keydown", (e) => { if (e.key === "Enter") checkSingle(); });
+</script>
+</body>
+</html>
