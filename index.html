@@ -71,6 +71,17 @@
   }
   .field { display: flex; flex-direction: column; gap: 3px; flex: 1 1 120px; min-width: 110px; }
   .field label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .metrics .up { color: var(--good); }
+  .metrics .down { color: var(--crit); }
+  select {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--ink);
+    padding: 8px 10px;
+    font-size: 0.9rem;
+    width: 100%;
+  }
   input[type="number"], input[type="text"] {
     background: var(--surface-2);
     border: 1px solid var(--border);
@@ -253,6 +264,14 @@
     <label for="maxMcap">Max mcap ($)</label>
     <input type="number" id="maxMcap" placeholder="no limit" min="0" step="10000">
   </div>
+  <div class="field">
+    <label for="sortBy">Sort by</label>
+    <select id="sortBy">
+      <option value="heat" selected>Heat (momentum)</option>
+      <option value="volume">24h volume</option>
+      <option value="newest">Newest</option>
+    </select>
+  </div>
   <button id="scanBtn">Scan</button>
 </div>
 
@@ -270,7 +289,8 @@
   Data: <a href="https://docs.dexscreener.com/api/reference" target="_blank" rel="noopener">DexScreener</a> &middot;
   <a href="https://rugcheck.xyz" target="_blank" rel="noopener">RugCheck</a> &middot;
   fallback: <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">GeckoTerminal</a>.
-  Not financial advice &mdash; a PASS only means no automated flags.
+  Not financial advice &mdash; a PASS only means no automated flags, and Heat measures current
+  activity (buy pressure, turnover, price action), not future performance.
 </footer>
 
 <script>
@@ -385,6 +405,8 @@ async function discoverViaFallback() {
       if (seen.has(mint)) continue;
       seen.add(mint);
       const nameParts = (a.name || "").split(" / ");
+      const pc = a.price_change_percentage || {};
+      const tx = (a.transactions && a.transactions.h24) || {};
       tokens.push({
         mint,
         boosted: false,
@@ -397,6 +419,10 @@ async function discoverViaFallback() {
           marketCap: a.market_cap_usd != null ? parseFloat(a.market_cap_usd) : null,
           fdv: a.fdv_usd != null ? parseFloat(a.fdv_usd) : null,
           createdAt: a.pool_created_at ? Date.parse(a.pool_created_at) : null,
+          change1h: pc.h1 != null ? parseFloat(pc.h1) : null,
+          change24h: pc.h24 != null ? parseFloat(pc.h24) : null,
+          buys: tx.buys != null ? tx.buys : null,
+          sells: tx.sells != null ? tx.sells : null,
           url: "https://www.geckoterminal.com/solana/pools/" + a.address,
         },
       });
@@ -429,12 +455,58 @@ async function fetchMarketData(mints) {
         marketCap: p.marketCap != null ? p.marketCap : null,
         fdv: p.fdv != null ? p.fdv : null,
         createdAt: p.pairCreatedAt || null,
+        change1h: p.priceChange && p.priceChange.h1 != null ? p.priceChange.h1 : null,
+        change24h: p.priceChange && p.priceChange.h24 != null ? p.priceChange.h24 : null,
+        buys: p.txns && p.txns.h24 ? p.txns.h24.buys : null,
+        sells: p.txns && p.txns.h24 ? p.txns.h24.sells : null,
         url: p.url || "https://dexscreener.com/solana/" + mint,
       });
     }
     if (i + 30 < mints.length) await sleep(250);
   }
   return byMint;
+}
+
+/* ---------- momentum heuristic ---------- */
+
+// 0-100 "heat" score from signals traders watch for early movers.
+// Heuristic only — it measures current activity, it does not predict anything.
+function heatScore(pair, boosted) {
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  let score = 0;
+  // Buy pressure: share of buys in 24h txns (0.5 = neutral). 30 pts.
+  if (pair.buys != null && pair.sells != null && pair.buys + pair.sells >= 20) {
+    score += 30 * clamp01((pair.buys / (pair.buys + pair.sells) - 0.35) / 0.4);
+  }
+  // Turnover: 24h volume relative to mcap/FDV — high churn means live interest. 30 pts.
+  const cap = pair.marketCap != null ? pair.marketCap : pair.fdv;
+  if (cap > 0 && pair.volume24 > 0) {
+    score += 30 * clamp01((pair.volume24 / cap) / 3);
+  }
+  // Short-term price action: +1h move, capped so a +50% candle maxes it. 25 pts.
+  if (pair.change1h != null) {
+    score += 25 * clamp01(pair.change1h / 50);
+  }
+  // 24h trend still positive but not already fully mooned. 10 pts.
+  if (pair.change24h != null) {
+    score += 10 * clamp01(pair.change24h / 100);
+  }
+  // Paying for a DexScreener boost = active promotion. 5 pts.
+  if (boosted) score += 5;
+  return Math.round(score);
+}
+
+function heatHtml(t) {
+  const h = t.heat != null ? t.heat : (t.heat = heatScore(t.pair, t.boosted));
+  const flame = h >= 70 ? "🔥 " : "";
+  return '<span>Heat <b>' + flame + h + '</b></span>';
+}
+
+function pctHtml(label, v) {
+  if (v == null || isNaN(v)) return '<span>' + label + ' <b>–</b></span>';
+  const cls = v > 0 ? "up" : v < 0 ? "down" : "";
+  const sign = v > 0 ? "+" : "";
+  return '<span>' + label + ' <b class="' + cls + '">' + sign + v.toFixed(1) + '%</b></span>';
 }
 
 /* ---------- RugCheck ---------- */
@@ -488,8 +560,12 @@ function tokenCard(t) {
           '<span>Liq <b>' + fmtUsd(t.pair.liquidity) + '</b></span>' +
           '<span>Vol24h <b>' + fmtUsd(t.pair.volume24) + '</b></span>' +
           '<span>MCap <b>' + fmtUsd(t.pair.marketCap != null ? t.pair.marketCap : t.pair.fdv) + '</b></span>' +
-          '<span>FDV <b>' + fmtUsd(t.pair.fdv) + '</b></span>' +
           '<span>Age <b>' + fmtAge(ageH) + '</b></span>' +
+          pctHtml("Δ1h", t.pair.change1h) +
+          pctHtml("Δ24h", t.pair.change24h) +
+          (t.pair.buys != null && t.pair.sells != null && t.pair.buys + t.pair.sells > 0
+            ? '<span>Buys <b>' + Math.round(100 * t.pair.buys / (t.pair.buys + t.pair.sells)) + '%</b></span>' : "") +
+          heatHtml(t) +
         '</div>' +
       '</div>' +
       '<div class="card-body">' + cardBody(t) + '</div>' +
@@ -600,7 +676,11 @@ async function runScan() {
       return t.pair.liquidity >= minLiq && t.pair.volume24 >= minVol && ageH <= maxAgeH &&
         mcap >= minMcap && mcap <= maxMcap;
     });
-    filtered.sort((a, b) => b.pair.volume24 - a.pair.volume24);
+    const sortBy = $("sortBy").value;
+    for (const t of filtered) t.heat = heatScore(t.pair, t.boosted);
+    if (sortBy === "heat") filtered.sort((a, b) => b.heat - a.heat);
+    else if (sortBy === "newest") filtered.sort((a, b) => (b.pair.createdAt || 0) - (a.pair.createdAt || 0));
+    else filtered.sort((a, b) => b.pair.volume24 - a.pair.volume24);
     let truncated = 0;
     if (filtered.length > MAX_RUGCHECKS) {
       truncated = filtered.length - MAX_RUGCHECKS;
@@ -620,7 +700,7 @@ async function runScan() {
     let passed = 0, done = 0;
     for (const t of filtered) {
       setStatus("RugCheck " + (done + 1) + "/" + filtered.length + ": " + t.pair.symbol + "…" +
-        (truncated ? " (checking top " + MAX_RUGCHECKS + " by volume; " + truncated + " more met filters)" : ""), "", true);
+        (truncated ? " (checking top " + MAX_RUGCHECKS + " by current sort; " + truncated + " more met filters)" : ""), "", true);
       try {
         const r = await rugcheckToken(t.mint);
         t.verdict = r.verdict;
@@ -641,7 +721,7 @@ async function runScan() {
     const fails = filtered.filter((t) => t.verdict === "fail").length;
     setStatus("Done" + (usedFallback ? " (via GeckoTerminal fallback)" : "") + ": " +
       passed + " passed, " + cautions + " caution, " + fails + " failed" +
-      (truncated ? " — top " + MAX_RUGCHECKS + " by volume checked, " + truncated + " more met filters" : "") + ".");
+      (truncated ? " — top " + MAX_RUGCHECKS + " by current sort checked, " + truncated + " more met filters" : "") + ".");
   } catch (e) {
     setStatus(describeError(e, "scanning"), "error");
   } finally {
