@@ -298,6 +298,7 @@
     <label for="sortBy">Sort by</label>
     <select id="sortBy">
       <option value="heat" selected>Heat (momentum)</option>
+      <option value="trend">Trend (engagement)</option>
       <option value="volume">24h volume</option>
       <option value="newest">Newest</option>
     </select>
@@ -439,14 +440,29 @@ async function discoverTokens() {
     fetchJson("https://api.dexscreener.com/token-profiles/latest/v1", "DexScreener profiles"),
     fetchJson("https://api.dexscreener.com/token-boosts/latest/v1", "DexScreener boosts"),
   ]);
-  const seen = new Set();
   const tokens = [];
+  const byKey = new Map();
   for (const item of [].concat(profiles || [], boosts || [])) {
     if (!item.chainId || !item.tokenAddress) continue;
     const key = tokenKey(item.chainId, item.tokenAddress);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    tokens.push({ mint: item.tokenAddress, chain: item.chainId, boosted: item.totalAmount != null });
+    // Count distinct social/link types on the profile (website, twitter, telegram…)
+    const linkTypes = new Set();
+    for (const l of item.links || []) linkTypes.add((l.type || l.label || "link").toLowerCase());
+    const boostAmount = item.totalAmount || 0;
+    const existing = byKey.get(key);
+    if (existing) {
+      // token can appear in both feeds — merge the engagement data
+      existing.boosted = existing.boosted || item.totalAmount != null;
+      existing.boostAmount = Math.max(existing.boostAmount, boostAmount);
+      existing.socials = Math.max(existing.socials, linkTypes.size);
+      continue;
+    }
+    const t = {
+      mint: item.tokenAddress, chain: item.chainId,
+      boosted: item.totalAmount != null, boostAmount, socials: linkTypes.size,
+    };
+    byKey.set(key, t);
+    tokens.push(t);
   }
   return tokens;
 }
@@ -586,6 +602,55 @@ function heatScore(pair, boosted) {
   return Math.round(score);
 }
 
+// Trend / engagement score (0-100): how much crowd is on this coin right now.
+// Measures participation (trades, breadth, acceleration, socials, boost spend),
+// not price. Components with no data are skipped and the score renormalized.
+function trendAssess(t) {
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  const p = t.pair;
+  const pts = [];
+  let earned = 0, possible = 0;
+  const add = (weight, frac, ok, text) => {
+    earned += weight * clamp01(frac);
+    possible += weight;
+    pts.push({ ok, text });
+  };
+
+  const tx24 = (p.buys || 0) + (p.sells || 0);
+  if (p.buys != null && p.sells != null) {
+    // 30 pts: raw participation — 1000+ trades/24h is a busy memecoin
+    add(30, Math.log10(1 + tx24) / 3, tx24 >= 300, tx24 + " trades in 24h — " + (tx24 >= 300 ? "active" : "sparse"));
+  }
+  const tx1 = (p.buys1h || 0) + (p.sells1h || 0);
+  if (tx24 > 0 && (p.buys1h != null || p.sells1h != null)) {
+    // 25 pts: acceleration — last-hour trade rate vs the 24h hourly average
+    const ratio = (tx1 * 24) / tx24;
+    add(25, (ratio - 0.3) / 1.7, ratio >= 1, "last-hour trade rate " + ratio.toFixed(1) + "× the 24h average — " + (ratio >= 1 ? "crowd arriving" : "crowd thinning"));
+  }
+  if (tx24 >= 20 && p.volume24 > 0) {
+    // 15 pts: breadth — small average trades = many small wallets, not a few whales
+    const avg = p.volume24 / tx24;
+    add(15, (2000 - avg) / 1800, avg <= 500, "avg trade " + fmtUsd(avg) + " — " + (avg <= 500 ? "retail-sized (broad crowd)" : "whale-sized (narrow crowd)"));
+  }
+  if (t.socials != null) {
+    // 20 pts: social footprint on the DexScreener profile
+    add(20, t.socials / 3, t.socials >= 2, t.socials + " social/link type" + (t.socials === 1 ? "" : "s") + " on profile" + (t.socials === 0 ? " — anonymous launch" : ""));
+  }
+  if (t.boostAmount != null) {
+    // 10 pts: paid DexScreener boosts — bought attention still draws eyes
+    add(10, t.boostAmount / 200, t.boostAmount > 0, t.boostAmount > 0 ? t.boostAmount + " boost points purchased" : "no paid boosts");
+  }
+
+  const score = possible > 0 ? Math.round(100 * earned / possible) : null;
+  return { score, pts };
+}
+
+function trendHtml(t) {
+  const tr = t.trend || (t.trend = trendAssess(t));
+  if (tr.score == null) return "";
+  return '<span>Trend <b>' + (tr.score >= 70 ? "📈 " : "") + tr.score + '</b></span>';
+}
+
 // Run-room assessment: is the move still fed, or exhausted? Heuristic — NOT a
 // prediction. Classifies each token as EARLY / RUNNING / EXTENDED / QUIET from
 // signals traders use to judge whether a pump has anything left behind it.
@@ -711,6 +776,8 @@ async function goplusCheckChunk(chain, chunk) {
     t.risks = goplusRisks(d);
     t.verdict = verdictFromRisks(t.risks);
     t.score = null;
+    const hc = parseInt(d.holder_count, 10);
+    if (!isNaN(hc)) t.holders = hc;
   }
 }
 
@@ -787,6 +854,8 @@ function tokenCard(t) {
           (t.pair.buys != null && t.pair.sells != null && t.pair.buys + t.pair.sells > 0
             ? '<span>Buys <b>' + Math.round(100 * t.pair.buys / (t.pair.buys + t.pair.sells)) + '%</b></span>' : "") +
           heatHtml(t) +
+          trendHtml(t) +
+          (t.holders != null ? '<span>Holders <b>' + t.holders.toLocaleString() + '</b></span>' : "") +
           (() => { const p = PHASE_BADGE[(t.runway || (t.runway = runwayAssess(t.pair))).phase];
                    return '<span class="phase ' + p.cls + '">' + p.text + '</span>'; })() +
         '</div>' +
@@ -813,13 +882,20 @@ function cardBody(t) {
     if (t.score != null) riskHtml += '<div class="risk"><span class="desc">RugCheck risk score: ' + t.score + '/100 (lower is safer)</span></div>';
   }
   const rw = t.runway || (t.runway = runwayAssess(t.pair));
+  const tr = t.trend || (t.trend = trendAssess(t));
+  const sigRow = (p) =>
+    '<div class="risk"><span class="lvl ' + (p.ok ? "rw-ok" : "rw-no") + '">' + (p.ok ? "✓" : "✕") + '</span>' +
+    '<span class="desc">' + esc(p.text) + '</span></div>';
   const rwHtml = '<div class="rw">' +
     '<div class="rw-head">Run-room signals — heuristic, not a prediction</div>' +
-    rw.pts.map((p) =>
-      '<div class="risk"><span class="lvl ' + (p.ok ? "rw-ok" : "rw-no") + '">' + (p.ok ? "✓" : "✕") + '</span>' +
-      '<span class="desc">' + esc(p.text) + '</span></div>').join("") +
+    rw.pts.map(sigRow).join("") +
     '<div class="rw-note">' + esc(rw.note) + '</div>' +
-  '</div>';
+  '</div>' +
+  (tr.score == null ? "" :
+  '<div class="rw">' +
+    '<div class="rw-head">Engagement signals — trend score ' + tr.score + '/100</div>' +
+    tr.pts.map(sigRow).join("") +
+  '</div>');
   const links = [];
   if (t.chain === "solana") {
     links.push(["RugCheck", "https://rugcheck.xyz/tokens/" + t.mint]);
@@ -917,8 +993,12 @@ async function runScan() {
         mcap >= minMcap && mcap <= maxMcap;
     });
     const sortBy = $("sortBy").value;
-    for (const t of filtered) t.heat = heatScore(t.pair, t.boosted);
+    for (const t of filtered) {
+      t.heat = heatScore(t.pair, t.boosted);
+      t.trend = trendAssess(t);
+    }
     if (sortBy === "heat") filtered.sort((a, b) => b.heat - a.heat);
+    else if (sortBy === "trend") filtered.sort((a, b) => (b.trend.score || 0) - (a.trend.score || 0));
     else if (sortBy === "newest") filtered.sort((a, b) => (b.pair.createdAt || 0) - (a.pair.createdAt || 0));
     else filtered.sort((a, b) => b.pair.volume24 - a.pair.volume24);
     let truncated = 0;
