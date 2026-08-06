@@ -101,6 +101,15 @@
   .rw { border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 8px; }
   .rw-head { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px; }
   .rw-note { color: var(--ink-2); font-size: 0.78rem; margin-top: 4px; font-style: italic; }
+  .lore-text {
+    color: var(--ink-2);
+    font-size: 0.78rem;
+    font-style: italic;
+    border-left: 2px solid var(--border);
+    padding: 4px 0 4px 10px;
+    margin-top: 6px;
+    white-space: pre-line;
+  }
   .risk .lvl.rw-ok { color: var(--good); }
   .risk .lvl.rw-no { color: var(--crit); }
   select {
@@ -299,6 +308,7 @@
     <select id="sortBy">
       <option value="heat" selected>Heat (momentum)</option>
       <option value="trend">Trend (engagement)</option>
+      <option value="lore">Lore (story depth)</option>
       <option value="volume">24h volume</option>
       <option value="newest">Newest</option>
     </select>
@@ -449,17 +459,31 @@ async function discoverTokens() {
     const linkTypes = new Set();
     for (const l of item.links || []) linkTypes.add((l.type || l.label || "link").toLowerCase());
     const boostAmount = item.totalAmount || 0;
+    const profile = {
+      description: (item.description || "").trim(),
+      linkTypes,
+      hasHeader: !!item.header,
+      hasIcon: !!item.icon,
+      cto: item.cto === true,
+    };
     const existing = byKey.get(key);
     if (existing) {
-      // token can appear in both feeds — merge the engagement data
+      // token can appear in both feeds — merge the engagement/lore data
       existing.boosted = existing.boosted || item.totalAmount != null;
       existing.boostAmount = Math.max(existing.boostAmount, boostAmount);
       existing.socials = Math.max(existing.socials, linkTypes.size);
+      const ep = existing.profile;
+      if (profile.description.length > ep.description.length) ep.description = profile.description;
+      for (const lt of linkTypes) ep.linkTypes.add(lt);
+      ep.hasHeader = ep.hasHeader || profile.hasHeader;
+      ep.hasIcon = ep.hasIcon || profile.hasIcon;
+      ep.cto = ep.cto || profile.cto;
       continue;
     }
     const t = {
       mint: item.tokenAddress, chain: item.chainId,
       boosted: item.totalAmount != null, boostAmount, socials: linkTypes.size,
+      profile,
     };
     byKey.set(key, t);
     tokens.push(t);
@@ -649,6 +673,51 @@ function trendHtml(t) {
   const tr = t.trend || (t.trend = trendAssess(t));
   if (tr.score == null) return "";
   return '<span>Trend <b>' + (tr.score >= 70 ? "📈 " : "") + tr.score + '</b></span>';
+}
+
+// Lore score (0-100): how deep the story goes. Measures the coin's observable
+// narrative footprint on its DexScreener profile — written mythology, world
+// breadth across platforms, branding investment, community takeover.
+function loreAssess(t) {
+  const p = t.profile;
+  if (!p) return { score: null, pts: [] };
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  const pts = [];
+  let score = 0;
+
+  // 40 pts: story depth — a written narrative, scaled by substance
+  const words = p.description ? p.description.split(/\s+/).filter(Boolean).length : 0;
+  score += 40 * clamp01(words / 60);
+  pts.push({ ok: words >= 20, text: words === 0 ? "no written story — blank profile"
+    : words + "-word story on the profile — " + (words >= 60 ? "full mythology" : words >= 20 ? "has a narrative" : "one-liner") });
+
+  // 30 pts: world breadth — website, community chat, cross-platform presence
+  const lt = p.linkTypes;
+  const hasSite = lt.has("website");
+  const hasChat = lt.has("telegram") || lt.has("discord");
+  const extras = ["tiktok", "instagram", "youtube", "reddit", "medium", "github"].filter((x) => lt.has(x));
+  if (hasSite) score += 10;
+  pts.push({ ok: hasSite, text: hasSite ? "has a website" : "no website" });
+  if (hasChat) score += 10;
+  pts.push({ ok: hasChat, text: hasChat ? "has a community chat (Telegram/Discord)" : "no community chat" });
+  score += 10 * clamp01(extras.length / 2);
+  pts.push({ ok: extras.length > 0, text: extras.length > 0 ? "present on " + extras.join(", ") : "no presence beyond X/chat" });
+
+  // 15 pts: branding investment — custom icon and header art
+  if (p.hasIcon) score += 5;
+  if (p.hasHeader) score += 10;
+  pts.push({ ok: p.hasIcon && p.hasHeader, text: p.hasIcon && p.hasHeader ? "custom icon + header art" : p.hasIcon ? "icon only, no header art" : "no branding assets" });
+
+  // 15 pts: community takeover — the community adopted an abandoned coin
+  if (p.cto) { score += 15; pts.push({ ok: true, text: "community takeover (CTO) — the crowd owns this story now" }); }
+
+  return { score: Math.round(score), pts };
+}
+
+function loreHtml(t) {
+  const lo = t.lore || (t.lore = loreAssess(t));
+  if (lo.score == null) return "";
+  return '<span>Lore <b>' + (lo.score >= 70 ? "📖 " : "") + lo.score + '</b></span>';
 }
 
 // Run-room assessment: is the move still fed, or exhausted? Heuristic — NOT a
@@ -913,6 +982,7 @@ function tokenCard(t) {
             ? '<span>Buys <b>' + Math.round(100 * t.pair.buys / (t.pair.buys + t.pair.sells)) + '%</b></span>' : "") +
           heatHtml(t) +
           trendHtml(t) +
+          loreHtml(t) +
           (t.holders != null ? '<span>Holders <b>' + t.holders.toLocaleString() + '</b></span>' : "") +
           (t.research ? '<span>Research <b>' + t.research.filter((p) => p.ok).length + "/" + t.research.length + '</b></span>' : "") +
           (() => { const p = PHASE_BADGE[(t.runway || (t.runway = runwayAssess(t.pair))).phase];
@@ -962,7 +1032,18 @@ function cardBody(t) {
   '</div>'
   : t.researchError ?
   '<div class="rw"><div class="rw-head">Deep research</div><div class="rw-note">' + esc(t.researchError) + '</div></div>'
-  : "");
+  : "") +
+  (() => {
+    const lo = t.lore || (t.lore = loreAssess(t));
+    if (lo.score == null) return "";
+    return '<div class="rw">' +
+      '<div class="rw-head">Lore signals — score ' + lo.score + '/100</div>' +
+      lo.pts.map(sigRow).join("") +
+      (t.profile && t.profile.description
+        ? '<div class="lore-text">&ldquo;' + esc(t.profile.description.length > 420 ? t.profile.description.slice(0, 420) + "…" : t.profile.description) + '&rdquo;</div>'
+        : "") +
+    '</div>';
+  })();
   const links = [];
   if (t.chain === "solana") {
     links.push(["RugCheck", "https://rugcheck.xyz/tokens/" + t.mint]);
@@ -1063,9 +1144,11 @@ async function runScan() {
     for (const t of filtered) {
       t.heat = heatScore(t.pair, t.boosted);
       t.trend = trendAssess(t);
+      t.lore = loreAssess(t);
     }
     if (sortBy === "heat") filtered.sort((a, b) => b.heat - a.heat);
     else if (sortBy === "trend") filtered.sort((a, b) => (b.trend.score || 0) - (a.trend.score || 0));
+    else if (sortBy === "lore") filtered.sort((a, b) => (b.lore.score || 0) - (a.lore.score || 0));
     else if (sortBy === "newest") filtered.sort((a, b) => (b.pair.createdAt || 0) - (a.pair.createdAt || 0));
     else filtered.sort((a, b) => b.pair.volume24 - a.pair.volume24);
     let truncated = 0;
