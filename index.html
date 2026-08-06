@@ -73,6 +73,24 @@
   .field label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
   .metrics .up { color: var(--good); }
   .metrics .down { color: var(--crit); }
+  .phase {
+    font-size: 0.66rem;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid;
+    letter-spacing: 0.04em;
+    align-self: center;
+  }
+  .ph-early { color: var(--good); border-color: var(--good); }
+  .ph-running { color: var(--warn); border-color: var(--warn); }
+  .ph-extended { color: var(--crit); border-color: var(--crit); }
+  .ph-quiet { color: var(--muted); border-color: var(--border); }
+  .rw { border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 8px; }
+  .rw-head { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px; }
+  .rw-note { color: var(--ink-2); font-size: 0.78rem; margin-top: 4px; font-style: italic; }
+  .risk .lvl.rw-ok { color: var(--good); }
+  .risk .lvl.rw-no { color: var(--crit); }
   select {
     background: var(--surface-2);
     border: 1px solid var(--border);
@@ -420,9 +438,12 @@ async function discoverViaFallback() {
           fdv: a.fdv_usd != null ? parseFloat(a.fdv_usd) : null,
           createdAt: a.pool_created_at ? Date.parse(a.pool_created_at) : null,
           change1h: pc.h1 != null ? parseFloat(pc.h1) : null,
+          change6h: pc.h6 != null ? parseFloat(pc.h6) : null,
           change24h: pc.h24 != null ? parseFloat(pc.h24) : null,
           buys: tx.buys != null ? tx.buys : null,
           sells: tx.sells != null ? tx.sells : null,
+          buys1h: a.transactions && a.transactions.h1 ? a.transactions.h1.buys : null,
+          sells1h: a.transactions && a.transactions.h1 ? a.transactions.h1.sells : null,
           url: "https://www.geckoterminal.com/solana/pools/" + a.address,
         },
       });
@@ -456,9 +477,12 @@ async function fetchMarketData(mints) {
         fdv: p.fdv != null ? p.fdv : null,
         createdAt: p.pairCreatedAt || null,
         change1h: p.priceChange && p.priceChange.h1 != null ? p.priceChange.h1 : null,
+        change6h: p.priceChange && p.priceChange.h6 != null ? p.priceChange.h6 : null,
         change24h: p.priceChange && p.priceChange.h24 != null ? p.priceChange.h24 : null,
         buys: p.txns && p.txns.h24 ? p.txns.h24.buys : null,
         sells: p.txns && p.txns.h24 ? p.txns.h24.sells : null,
+        buys1h: p.txns && p.txns.h1 ? p.txns.h1.buys : null,
+        sells1h: p.txns && p.txns.h1 ? p.txns.h1.sells : null,
         url: p.url || "https://dexscreener.com/solana/" + mint,
       });
     }
@@ -495,6 +519,69 @@ function heatScore(pair, boosted) {
   if (boosted) score += 5;
   return Math.round(score);
 }
+
+// Run-room assessment: is the move still fed, or exhausted? Heuristic — NOT a
+// prediction. Classifies each token as EARLY / RUNNING / EXTENDED / QUIET from
+// signals traders use to judge whether a pump has anything left behind it.
+function runwayAssess(pair) {
+  const pts = [];
+  const cap = pair.marketCap != null ? pair.marketCap : pair.fdv;
+  const c1 = pair.change1h, c6 = pair.change6h, c24 = pair.change24h;
+  let freshVotes = 0, freshChecks = 0;
+
+  if (c1 != null) {
+    freshChecks++;
+    const ok = c1 > 0;
+    if (ok) freshVotes++;
+    pts.push({ ok, text: "1h price " + (c1 > 0 ? "+" : "") + c1.toFixed(1) + "% — " + (ok ? "still moving up" : "rolling over") });
+  }
+  if (c1 != null && c6 != null && c6 !== 0) {
+    freshChecks++;
+    const pace6 = c6 / 6; // avg hourly pace over 6h
+    const ok = c1 > 0 && c1 >= pace6;
+    if (ok) freshVotes++;
+    pts.push({ ok, text: "vs 6h pace (" + (pace6 > 0 ? "+" : "") + pace6.toFixed(1) + "%/h): " + (ok ? "accelerating" : "decelerating") });
+  }
+  const t1 = (pair.buys1h || 0) + (pair.sells1h || 0);
+  if (t1 >= 10) {
+    freshChecks++;
+    const pct1 = 100 * pair.buys1h / t1;
+    const t24 = (pair.buys || 0) + (pair.sells || 0);
+    const pct24 = t24 > 0 ? 100 * pair.buys / t24 : null;
+    const ok = pct1 >= 52 && (pct24 == null || pct1 >= pct24 - 5);
+    if (ok) freshVotes++;
+    pts.push({ ok, text: "last-hour buys " + pct1.toFixed(0) + "%" + (pct24 != null ? " (24h avg " + pct24.toFixed(0) + "%)" : "") + " — " + (ok ? "buyers still dominant" : "buy pressure fading") });
+  }
+  if (cap > 0) {
+    const ok = cap < 1e6;
+    const tier = cap < 25e4 ? "micro-cap — most theoretical headroom (and most risk)"
+      : cap < 1e6 ? "small — meaningful headroom possible"
+      : cap < 1e7 ? "mid-size for a memecoin — big multiples get harder"
+      : "large for a memecoin — further 10x moves are rare";
+    pts.push({ ok, text: "mcap " + fmtUsd(cap) + ": " + tier });
+  }
+  if (cap > 0 && pair.liquidity > 0) {
+    const ratio = pair.liquidity / cap;
+    const ok = ratio >= 0.05;
+    pts.push({ ok, text: "liquidity " + (100 * ratio).toFixed(1) + "% of mcap — " + (ok ? "reasonable exit depth" : ratio < 0.02 ? "very thin: one big sell can end the move" : "thin exit depth") });
+  }
+
+  const fresh = freshChecks > 0 && freshVotes * 2 > freshChecks; // majority of momentum signals positive
+  const big = c24 != null && c24 >= 300;
+  let phase, note;
+  if (fresh && !big) { phase = "early"; note = "Momentum is fresh and the 24h move isn't huge yet."; }
+  else if (fresh && big) { phase = "running"; note = "Already up big but still being bought — chasing here is high risk."; }
+  else if (!fresh && big) { phase = "extended"; note = "Big move with fading momentum — the easy part is likely over."; }
+  else { phase = "quiet"; note = "No strong momentum right now."; }
+  return { phase, note, pts };
+}
+
+const PHASE_BADGE = {
+  early:    { cls: "ph-early",    text: "EARLY" },
+  running:  { cls: "ph-running",  text: "RUNNING" },
+  extended: { cls: "ph-extended", text: "EXTENDED" },
+  quiet:    { cls: "ph-quiet",    text: "QUIET" },
+};
 
 function heatHtml(t) {
   const h = t.heat != null ? t.heat : (t.heat = heatScore(t.pair, t.boosted));
@@ -566,6 +653,8 @@ function tokenCard(t) {
           (t.pair.buys != null && t.pair.sells != null && t.pair.buys + t.pair.sells > 0
             ? '<span>Buys <b>' + Math.round(100 * t.pair.buys / (t.pair.buys + t.pair.sells)) + '%</b></span>' : "") +
           heatHtml(t) +
+          (() => { const p = PHASE_BADGE[(t.runway || (t.runway = runwayAssess(t.pair))).phase];
+                   return '<span class="phase ' + p.cls + '">' + p.text + '</span>'; })() +
         '</div>' +
       '</div>' +
       '<div class="card-body">' + cardBody(t) + '</div>' +
@@ -589,7 +678,15 @@ function cardBody(t) {
       '</div>').join("");
     if (t.score != null) riskHtml += '<div class="risk"><span class="desc">RugCheck risk score: ' + t.score + '/100 (lower is safer)</span></div>';
   }
-  return riskHtml +
+  const rw = t.runway || (t.runway = runwayAssess(t.pair));
+  const rwHtml = '<div class="rw">' +
+    '<div class="rw-head">Run-room signals — heuristic, not a prediction</div>' +
+    rw.pts.map((p) =>
+      '<div class="risk"><span class="lvl ' + (p.ok ? "rw-ok" : "rw-no") + '">' + (p.ok ? "✓" : "✕") + '</span>' +
+      '<span class="desc">' + esc(p.text) + '</span></div>').join("") +
+    '<div class="rw-note">' + esc(rw.note) + '</div>' +
+  '</div>';
+  return rwHtml + riskHtml +
     '<div class="mint-line">Mint: ' + esc(t.mint) + '</div>' +
     '<div class="links">' +
       '<a target="_blank" rel="noopener" href="https://rugcheck.xyz/tokens/' + esc(t.mint) + '">RugCheck</a>' +
