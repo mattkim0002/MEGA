@@ -245,6 +245,14 @@
     <label for="maxAge">Max age (hours)</label>
     <input type="number" id="maxAge" value="72" min="1" step="1">
   </div>
+  <div class="field">
+    <label for="minMcap">Min mcap ($)</label>
+    <input type="number" id="minMcap" value="0" min="0" step="10000">
+  </div>
+  <div class="field">
+    <label for="maxMcap">Max mcap ($)</label>
+    <input type="number" id="maxMcap" placeholder="no limit" min="0" step="10000">
+  </div>
   <button id="scanBtn">Scan</button>
 </div>
 
@@ -582,10 +590,15 @@ async function runScan() {
     const minLiq = parseFloat($("minLiq").value) || 0;
     const minVol = parseFloat($("minVol").value) || 0;
     const maxAgeH = parseFloat($("maxAge").value) || Infinity;
+    const minMcap = parseFloat($("minMcap").value) || 0;
+    const maxMcapRaw = parseFloat($("maxMcap").value);
+    const maxMcap = !isFinite(maxMcapRaw) || maxMcapRaw <= 0 ? Infinity : maxMcapRaw;
     const now = Date.now();
     let filtered = withPairs.filter((t) => {
       const ageH = t.pair.createdAt ? (now - t.pair.createdAt) / 3.6e6 : Infinity;
-      return t.pair.liquidity >= minLiq && t.pair.volume24 >= minVol && ageH <= maxAgeH;
+      const mcap = t.pair.marketCap != null ? t.pair.marketCap : (t.pair.fdv != null ? t.pair.fdv : 0);
+      return t.pair.liquidity >= minLiq && t.pair.volume24 >= minVol && ageH <= maxAgeH &&
+        mcap >= minMcap && mcap <= maxMcap;
     });
     filtered.sort((a, b) => b.pair.volume24 - a.pair.volume24);
     let truncated = 0;
@@ -596,7 +609,7 @@ async function runScan() {
     setFunnel(tokens.length, withPairs.length, filtered.length + truncated, null);
 
     if (filtered.length === 0) {
-      setStatus("No tokens met the filters (liq ≥ " + fmtUsd(minLiq) + ", vol ≥ " + fmtUsd(minVol) + ", age ≤ " + maxAgeH + "h). Loosen them and re-scan.", "warn");
+      setStatus("No tokens met the filters (liq ≥ " + fmtUsd(minLiq) + ", vol ≥ " + fmtUsd(minVol) + ", age ≤ " + maxAgeH + "h, mcap " + fmtUsd(minMcap) + "–" + (maxMcap === Infinity ? "∞" : fmtUsd(maxMcap)) + "). Loosen them and re-scan.", "warn");
       return;
     }
 
