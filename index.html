@@ -73,6 +73,18 @@
   .field label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
   .metrics .up { color: var(--good); }
   .metrics .down { color: var(--crit); }
+  .chk {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    color: var(--ink-2);
+    cursor: pointer;
+    padding: 9px 0;
+    flex: 0 0 auto;
+  }
+  .chk input { accent-color: var(--accent); }
+  .pump-chip { color: var(--good); border-color: var(--good); }
   .chain-chip {
     font-size: 0.62rem;
     font-weight: 600;
@@ -316,6 +328,8 @@
   </div>
   <button id="scanBtn">Scan</button>
   <button class="secondary" id="huntBtn" title="Preset: micro-cap (&lt;$1M), under 24h old, sorted by crowd arrival — the observable profile coins have before big runs. No preset predicts winners.">🎯 Early hunt</button>
+  <button class="secondary" id="pumpBtn" title="Preset tuned to pump.fun bonding-curve economics: curve holds $1K-$6K liquidity and FDV sits under ~$70K until graduation, so normal floors would exclude every pre-graduation coin.">🚀 Pump hunt</button>
+  <label class="chk" title="Include pump.fun bonding-curve tokens (pre-graduation), via GeckoTerminal's index"><input type="checkbox" id="pumpFeed" checked> Pump.fun feed</label>
 </div>
 
 <div class="single">
@@ -493,6 +507,45 @@ async function discoverTokens() {
   return tokens;
 }
 
+// Map a GeckoTerminal pool object to a token with a pair built from the pool
+// attributes (stored as geckoPair — used directly in fallback mode, or as a
+// backstop when DexScreener has no pair for the mint yet).
+function geckoPoolToToken(pool) {
+  const a = pool.attributes || {};
+  const rel = pool.relationships || {};
+  const baseId = rel.base_token && rel.base_token.data && rel.base_token.data.id;
+  if (!baseId) return null;
+  const mint = baseId.replace(/^solana_/, "");
+  if (mint === "So11111111111111111111111111111111111111112") return null;
+  const nameParts = (a.name || "").split(" / ");
+  const pc = a.price_change_percentage || {};
+  const tx = (a.transactions && a.transactions.h24) || {};
+  return {
+    mint,
+    chain: "solana",
+    boosted: false,
+    geckoPair: {
+      chain: "solana",
+      symbol: nameParts[0] || mint.slice(0, 6),
+      name: a.name || "",
+      icon: null,
+      liquidity: parseFloat(a.reserve_in_usd),
+      volume24: a.volume_usd ? parseFloat(a.volume_usd.h24) : NaN,
+      marketCap: a.market_cap_usd != null ? parseFloat(a.market_cap_usd) : null,
+      fdv: a.fdv_usd != null ? parseFloat(a.fdv_usd) : null,
+      createdAt: a.pool_created_at ? Date.parse(a.pool_created_at) : null,
+      change1h: pc.h1 != null ? parseFloat(pc.h1) : null,
+      change6h: pc.h6 != null ? parseFloat(pc.h6) : null,
+      change24h: pc.h24 != null ? parseFloat(pc.h24) : null,
+      buys: tx.buys != null ? tx.buys : null,
+      sells: tx.sells != null ? tx.sells : null,
+      buys1h: a.transactions && a.transactions.h1 ? a.transactions.h1.buys : null,
+      sells1h: a.transactions && a.transactions.h1 ? a.transactions.h1.sells : null,
+      url: "https://www.geckoterminal.com/solana/pools/" + a.address,
+    },
+  };
+}
+
 // Fallback discovery + market data in one: GeckoTerminal new Solana pools
 async function discoverViaFallback() {
   const tokens = [];
@@ -503,39 +556,33 @@ async function discoverViaFallback() {
       "GeckoTerminal (fallback)"
     );
     for (const pool of (data && data.data) || []) {
-      const a = pool.attributes || {};
-      const rel = pool.relationships || {};
-      const baseId = rel.base_token && rel.base_token.data && rel.base_token.data.id;
-      if (!baseId) continue;
-      const mint = baseId.replace(/^solana_/, "");
-      if (seen.has(mint)) continue;
-      seen.add(mint);
-      const nameParts = (a.name || "").split(" / ");
-      const pc = a.price_change_percentage || {};
-      const tx = (a.transactions && a.transactions.h24) || {};
-      tokens.push({
-        mint,
-        chain: "solana",
-        boosted: false,
-        pair: {
-          symbol: nameParts[0] || mint.slice(0, 6),
-          name: a.name || "",
-          icon: null,
-          liquidity: parseFloat(a.reserve_in_usd),
-          volume24: a.volume_usd ? parseFloat(a.volume_usd.h24) : NaN,
-          marketCap: a.market_cap_usd != null ? parseFloat(a.market_cap_usd) : null,
-          fdv: a.fdv_usd != null ? parseFloat(a.fdv_usd) : null,
-          createdAt: a.pool_created_at ? Date.parse(a.pool_created_at) : null,
-          change1h: pc.h1 != null ? parseFloat(pc.h1) : null,
-          change6h: pc.h6 != null ? parseFloat(pc.h6) : null,
-          change24h: pc.h24 != null ? parseFloat(pc.h24) : null,
-          buys: tx.buys != null ? tx.buys : null,
-          sells: tx.sells != null ? tx.sells : null,
-          buys1h: a.transactions && a.transactions.h1 ? a.transactions.h1.buys : null,
-          sells1h: a.transactions && a.transactions.h1 ? a.transactions.h1.sells : null,
-          url: "https://www.geckoterminal.com/solana/pools/" + a.address,
-        },
-      });
+      const t = geckoPoolToToken(pool);
+      if (!t || seen.has(t.mint)) continue;
+      seen.add(t.mint);
+      t.pair = t.geckoPair;
+      tokens.push(t);
+    }
+  }
+  return tokens;
+}
+
+// Pump.fun bonding-curve tokens (pre-graduation), via GeckoTerminal's
+// pump-fun dex index — pump.fun's own API blocks browsers.
+async function discoverPumpFun() {
+  const tokens = [];
+  const seen = new Set();
+  for (let page = 1; page <= 2; page++) {
+    if (page > 1) await sleep(300);
+    const data = await fetchJson(
+      "https://api.geckoterminal.com/api/v2/networks/solana/dexes/pump-fun/pools?page=" + page,
+      "GeckoTerminal (pump.fun)"
+    );
+    for (const pool of (data && data.data) || []) {
+      const t = geckoPoolToToken(pool);
+      if (!t || seen.has(t.mint)) continue;
+      seen.add(t.mint);
+      t.pumpfun = true;
+      tokens.push(t);
     }
   }
   return tokens;
@@ -980,7 +1027,7 @@ function tokenCard(t) {
         '<div class="tok-id">' +
           (t.pair.icon ? '<img src="' + esc(t.pair.icon) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">' : "") +
           '<div class="tok-name">' +
-            '<div class="sym">' + esc(t.pair.symbol) + ' <span class="chain-chip">' + esc(t.chain) + '</span>' + (t.boosted ? ' <span title="Boosted on DexScreener">⚡</span>' : "") + '</div>' +
+            '<div class="sym">' + esc(t.pair.symbol) + ' <span class="chain-chip">' + esc(t.chain) + '</span>' + (t.pumpfun ? ' <span class="chain-chip pump-chip">pump.fun</span>' : "") + (t.boosted ? ' <span title="Boosted on DexScreener">⚡</span>' : "") + '</div>' +
             '<div class="nm">' + esc(t.pair.name) + '</div>' +
           '</div>' +
         '</div>' +
@@ -1122,6 +1169,21 @@ async function runScan() {
       tokens = await discoverViaFallback();
       usedFallback = true;
     }
+    if ($("pumpFeed").checked && !usedFallback) {
+      setStatus("Fetched " + tokens.length + " tokens. Adding pump.fun bonding-curve feed…", "", true);
+      try {
+        const pump = await discoverPumpFun();
+        const known = new Map(tokens.map((t) => [tokenKey(t.chain, t.mint), t]));
+        for (const p of pump) {
+          const existing = known.get(tokenKey(p.chain, p.mint));
+          if (existing) { existing.pumpfun = true; existing.geckoPair = p.geckoPair; }
+          else tokens.push(p);
+        }
+      } catch (e) {
+        setStatus(describeError(e, "loading pump.fun feed") + " Continuing without it…", "warn", true);
+        await sleep(800);
+      }
+    }
     setFunnel(tokens.length, null, null, null);
     if (tokens.length === 0) {
       setStatus("No Solana tokens in the latest DexScreener feed right now. Try again shortly.", "warn");
@@ -1136,8 +1198,8 @@ async function runScan() {
       setStatus("Fetched " + tokens.length + " tokens. Loading market data…", "", true);
       const market = await fetchMarketData(tokens);
       withPairs = tokens
-        .filter((t) => market.has(tokenKey(t.chain, t.mint)))
-        .map((t) => ({ ...t, pair: market.get(tokenKey(t.chain, t.mint)) }));
+        .map((t) => ({ ...t, pair: market.get(tokenKey(t.chain, t.mint)) || t.geckoPair }))
+        .filter((t) => t.pair);
     }
     setFunnel(tokens.length, withPairs.length, null, null);
 
@@ -1329,6 +1391,17 @@ $("huntBtn").addEventListener("click", () => {
   $("maxAge").value = 24;
   $("minMcap").value = 20000;
   $("maxMcap").value = 1000000;
+  $("sortBy").value = "trend";
+  runScan();
+});
+$("pumpBtn").addEventListener("click", () => {
+  // bonding-curve scale: the curve holds ~$1K-$6K and FDV < ~$70K pre-graduation
+  $("pumpFeed").checked = true;
+  $("minLiq").value = 1000;
+  $("minVol").value = 5000;
+  $("maxAge").value = 24;
+  $("minMcap").value = 2000;
+  $("maxMcap").value = 70000;
   $("sortBy").value = "trend";
   runScan();
 });
