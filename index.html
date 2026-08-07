@@ -286,6 +286,7 @@
   .mint-line { color: var(--muted); font-size: 0.72rem; word-break: break-all; margin-top: 8px; }
 
   .section-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 16px 0 8px; }
+  .empty-strict { padding: 16px; color: var(--ink-2); font-size: 0.85rem; line-height: 1.5; }
   footer { color: var(--muted); font-size: 0.7rem; margin-top: 24px; text-align: center; }
   footer a { color: var(--muted); }
 
@@ -347,6 +348,7 @@
   <button id="scanBtn">Scan</button>
   <button class="secondary" id="huntBtn" title="Preset: micro-cap (&lt;$1M), under 24h old, sorted by crowd arrival — the observable profile coins have before big runs. No preset predicts winners.">🎯 Early hunt</button>
   <label class="chk" title="Include pump.fun bonding-curve tokens (pre-graduation), via GeckoTerminal's index. Curve coins are judged at curve scale: min liquidity/mcap floors don't apply to them, since the curve holds only $1K-$6K by design."><input type="checkbox" id="pumpFeed" checked> Pump.fun feed</label>
+  <label class="chk" title="After all checks finish, only keep coins graded A or B: PASS verdict, strong holder/LP research, real exit depth, validated traction. Most scans will show few or none — an empty list means nothing met the evidence bar, which is the protection working."><input type="checkbox" id="strictMode" checked> Strict mode</label>
 </div>
 
 <div class="single">
@@ -1471,20 +1473,35 @@ async function runScan() {
       if (t.chain === "solana" && i + 1 < toResearch.length) await sleep(RUGCHECK_DELAY_MS);
     }
 
-    // Final re-rank by grade now that every signal is in
+    // Final pass now that every signal is in: re-rank by grade, then apply
+    // strict mode (A/B evidence bar) to what stays visible
     if (sortBy === "grade") {
       filtered.sort((a, b) => {
         const ga = gradeAssess(a), gb = gradeAssess(b);
         return (gb ? gb.score : -1) - (ga ? ga.score : -1);
       });
-      resultsEl.innerHTML = filtered.map(tokenCard).join("");
     }
+    let hidden = 0;
+    let visible = filtered;
+    if ($("strictMode").checked) {
+      visible = filtered.filter((t) => {
+        const g = gradeAssess(t);
+        return g && (g.tier === "A" || g.tier === "B");
+      });
+      hidden = filtered.length - visible.length;
+    }
+    resultsEl.innerHTML = visible.length
+      ? visible.map(tokenCard).join("")
+      : '<div class="card empty-strict">Nothing met the strict evidence bar this scan (grade A or B). ' +
+        'That is the filter doing its job — no coin today had clean security, strong holder research, and real exit depth all at once. ' +
+        'An empty list is information, not malfunction.</div>';
 
     const cautions = filtered.filter((t) => t.verdict === "caution").length;
     const fails = filtered.filter((t) => t.verdict === "fail").length;
     const setups = filtered.filter(isSetup).length;
     setStatus("Done" + (usedFallback ? " (via GeckoTerminal fallback)" : "") + ": " +
       passed + " passed, " + cautions + " caution, " + fails + " failed" +
+      (hidden ? " — strict mode: " + visible.length + " shown, " + hidden + " hidden below the A/B bar" : "") +
       (setups ? " — ⭐ " + setups + " match the early-hunt profile" : "") +
       (truncated ? " — top " + MAX_RUGCHECKS + " by current sort checked, " + truncated + " more met filters" : "") + ".");
   } catch (e) {
