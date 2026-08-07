@@ -305,10 +305,6 @@
     <input type="number" id="maxMcap" placeholder="no limit" min="0" step="10000">
   </div>
   <div class="field">
-    <label for="posSize">Position $ (exit math)</label>
-    <input type="number" id="posSize" value="100" min="1" step="50">
-  </div>
-  <div class="field">
     <label for="sortBy">Sort by</label>
     <select id="sortBy">
       <option value="heat" selected>Heat (momentum)</option>
@@ -352,8 +348,6 @@ const RUGCHECK_DELAY_MS = 900;
 const MAX_RUGCHECKS = 25;
 
 let scanning = false;
-let renderedTokens = [];   // tokens currently shown in #results
-let singleToken = null;    // token shown in #singleResult
 
 /* ---------- fetch layer with error classification ---------- */
 
@@ -734,41 +728,6 @@ function isSetup(t) {
     cap > 0 && cap < 1e6;
 }
 
-// Exit framework: mechanical take-profit ladder + exit feasibility + live
-// exit signals. There is no accurate "sell here" price — the ladder is a
-// pre-commitment so the top never needs predicting.
-function exitHtml(t) {
-  const cap = t.pair.marketCap != null ? t.pair.marketCap : t.pair.fdv;
-  if (!(cap > 0)) return "";
-  const pos = parseFloat($("posSize").value) || 100;
-  const liq = t.pair.liquidity;
-  const rows = [];
-  // Feasibility: rough constant-product impact of selling `pos` into this pool
-  if (liq > 0) {
-    const impact = 100 * pos / (liq / 2);
-    rows.push({ ok: impact <= 5, text: "selling " + fmtUsd(pos) + " here ≈ " + (impact >= 100 ? ">100" : impact < 0.1 ? "<0.1" : impact.toFixed(1)) + "% price impact (pool depth " + fmtUsd(liq) + ")" + (impact > 5 ? " — exit in pieces, or size down" : "") });
-  }
-  // Live exit signals from the run-room assessment
-  const rw = t.runway || (t.runway = runwayAssess(t.pair));
-  if (rw.phase === "extended") rows.push({ ok: false, text: "exit signals FIRING: move extended, momentum fading — the market is already leaving" });
-  else if (rw.phase === "running") rows.push({ ok: false, text: "move already large — if holding, trail your exits tighter" });
-  else rows.push({ ok: true, text: "no exit signals firing right now (phase: " + rw.phase.toUpperCase() + ")" });
-  const ladder = [
-    "at 2× (mcap ≈ " + fmtUsd(cap * 2) + "): sell 50% — your initial is off the table",
-    "at 4× (mcap ≈ " + fmtUsd(cap * 4) + "): sell half of what's left",
-    "at 10× (mcap ≈ " + fmtUsd(cap * 10) + "): sell half again; keep the rest as a moonbag",
-    "any time buys% drops under 40 or the phase flips to EXTENDED: sell the moonbag",
-  ];
-  return '<div class="rw">' +
-    '<div class="rw-head">Exit framework — mechanical, not a prediction</div>' +
-    rows.map((p) =>
-      '<div class="risk"><span class="lvl ' + (p.ok ? "rw-ok" : "rw-no") + '">' + (p.ok ? "✓" : "⚠") + '</span>' +
-      '<span class="desc">' + esc(p.text) + '</span></div>').join("") +
-    ladder.map((l) => '<div class="risk"><span class="lvl" style="color:var(--muted)">→</span><span class="desc">' + esc(l) + '</span></div>').join("") +
-    '<div class="rw-note">Decide the ladder before entering, then obey it. The mcap next to each multiple is the reality check.</div>' +
-  '</div>';
-}
-
 function loreHtml(t) {
   const lo = t.lore || (t.lore = loreAssess(t));
   if (lo.score == null) return "";
@@ -1099,8 +1058,7 @@ function cardBody(t) {
         ? '<div class="lore-text">&ldquo;' + esc(t.profile.description.length > 420 ? t.profile.description.slice(0, 420) + "…" : t.profile.description) + '&rdquo;</div>'
         : "") +
     '</div>';
-  })() +
-  exitHtml(t);
+  })();
   const links = [];
   if (t.chain === "solana") {
     links.push(["RugCheck", "https://rugcheck.xyz/tokens/" + t.mint]);
@@ -1223,7 +1181,6 @@ async function runScan() {
     // 4. Render pending cards, then RugCheck sequentially
     for (const t of filtered) t.verdict = "pending";
     resultsEl.innerHTML = filtered.map(tokenCard).join("");
-    renderedTokens = filtered;
 
     // Route security checks by chain: Solana → RugCheck (sequential, paced);
     // GoPlus-supported chains → one batched call per chunk; others → UNKNOWN.
@@ -1350,7 +1307,6 @@ async function checkSingle() {
       },
     };
     singleEl.innerHTML = '<div class="section-title">Single token check</div>' + tokenCard(t);
-    singleToken = t;
     setStatus("Running " + (chain === "solana" ? "RugCheck" : "GoPlus") + " on " + t.pair.symbol + " (" + chain + ")…", "", true);
     await securityCheckOne(t);
     if (t.verdict === "pass" || t.verdict === "caution") {
@@ -1378,10 +1334,6 @@ $("huntBtn").addEventListener("click", () => {
 });
 $("checkBtn").addEventListener("click", checkSingle);
 $("mintInput").addEventListener("keydown", (e) => { if (e.key === "Enter") checkSingle(); });
-$("posSize").addEventListener("change", () => {
-  for (const t of renderedTokens) rerenderCard(t, resultsEl);
-  if (singleToken) rerenderCard(singleToken, singleEl);
-});
 </script>
 </body>
 </html>
