@@ -111,6 +111,7 @@
   .ph-extended { color: var(--crit); border-color: var(--crit); }
   .ph-quiet { color: var(--muted); border-color: var(--border); }
   .ph-setup { color: var(--warn); border-color: var(--warn); background: rgba(250, 178, 25, 0.08); }
+  .ph-rebound { color: var(--accent); border-color: var(--accent); background: rgba(122, 162, 247, 0.08); }
   .rw { border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 8px; }
   .rw-head { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px; }
   .rw-note { color: var(--ink-2); font-size: 0.78rem; margin-top: 4px; font-style: italic; }
@@ -347,6 +348,7 @@
   </div>
   <button id="scanBtn">Scan</button>
   <button class="secondary" id="huntBtn" title="Preset: micro-cap (&lt;$1M), under 24h old, sorted by crowd arrival — the observable profile coins have before big runs. No preset predicts winners.">🎯 Early hunt</button>
+  <button class="secondary" id="recoveryBtn" title="Preset: $300K-$1M mcap, up to 7 days old, sorted by narrative strength. Coins matching the full rebound shape (sold off 20%+ over 24h, turning up in the last hour with buyers back, lore >= 40) get a REBOUND SHAPE badge. The shape is not a probability — most dipped coins keep falling.">🔄 Recovery</button>
   <label class="chk" title="Include pump.fun bonding-curve tokens (pre-graduation), via GeckoTerminal's index. Curve coins are judged at curve scale: min liquidity/mcap floors don't apply to them, since the curve holds only $1K-$6K by design."><input type="checkbox" id="pumpFeed" checked> Pump.fun feed</label>
   <label class="chk" title="After all checks finish, only keep coins graded A or B: PASS verdict, strong holder/LP research, real exit depth, validated traction. Most scans will show few or none — an empty list means nothing met the evidence bar, which is the protection working."><input type="checkbox" id="strictMode" checked> Strict mode</label>
 </div>
@@ -853,6 +855,19 @@ function isSetup(t) {
     cap > 0 && cap < 1e6;
 }
 
+// The dip-recovery shape: real prior sell-off, turning up right now with
+// buyers returning, and a narrative that gives the crowd a reason to come
+// back. A shape, not a probability — most dipped coins keep falling.
+function isRebound(t) {
+  const p = t.pair;
+  if (p.change24h == null || p.change24h > -20) return false;      // real sell-off
+  if (p.change1h == null || p.change1h <= 0) return false;         // turning up now
+  const t1 = (p.buys1h || 0) + (p.sells1h || 0);
+  if (t1 >= 10 && p.buys1h / t1 < 0.5) return false;               // buyers back
+  const lo = t.lore || (t.lore = loreAssess(t));
+  return (lo.score || 0) >= 40;                                     // has a story
+}
+
 function loreHtml(t) {
   const lo = t.lore || (t.lore = loreAssess(t));
   if (lo.score == null) return "";
@@ -1186,6 +1201,7 @@ function tokenCard(t) {
           (() => { const p = PHASE_BADGE[(t.runway || (t.runway = runwayAssess(t.pair))).phase];
                    return '<span class="phase ' + p.cls + '">' + p.text + '</span>'; })() +
           (isSetup(t) ? '<span class="phase ph-setup" title="PASS + EARLY + trend ≥ 60 + micro-cap: the pre-run profile. Not a prediction.">⭐ SETUP</span>' : "") +
+          (isRebound(t) ? '<span class="phase ph-rebound" title="Sold off 20%+ over 24h, turning up in the last hour with buyers back, narrative present. A shape, not a probability — most dipped coins keep falling.">↩ REBOUND SHAPE</span>' : "") +
         '</div>' +
       '</div>' +
       '<div class="card-body">' + cardBody(t) + '</div>' +
@@ -1503,6 +1519,7 @@ async function runScan() {
       passed + " passed, " + cautions + " caution, " + fails + " failed" +
       (hidden ? " — strict mode: " + visible.length + " shown, " + hidden + " hidden below the A/B bar" : "") +
       (setups ? " — ⭐ " + setups + " match the early-hunt profile" : "") +
+      ((() => { const n = filtered.filter(isRebound).length; return n ? " — ↩ " + n + " show the rebound shape" : ""; })()) +
       (truncated ? " — top " + MAX_RUGCHECKS + " by current sort checked, " + truncated + " more met filters" : "") + ".");
   } catch (e) {
     setStatus(describeError(e, "scanning"), "error");
@@ -1572,6 +1589,16 @@ async function checkSingle() {
 }
 
 $("scanBtn").addEventListener("click", runScan);
+$("recoveryBtn").addEventListener("click", () => {
+  // the user-observed pattern: 300K-1M mcap, story coins, old enough to have sold off
+  $("minLiq").value = 10000;
+  $("minVol").value = 10000;
+  $("maxAge").value = 168;
+  $("minMcap").value = 300000;
+  $("maxMcap").value = 1000000;
+  $("sortBy").value = "lore";
+  runScan();
+});
 $("huntBtn").addEventListener("click", () => {
   $("minLiq").value = 5000;
   $("minVol").value = 5000;
