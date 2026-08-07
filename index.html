@@ -98,6 +98,7 @@
   .ph-running { color: var(--warn); border-color: var(--warn); }
   .ph-extended { color: var(--crit); border-color: var(--crit); }
   .ph-quiet { color: var(--muted); border-color: var(--border); }
+  .ph-setup { color: var(--warn); border-color: var(--warn); background: rgba(250, 178, 25, 0.08); }
   .rw { border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 8px; }
   .rw-head { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px; }
   .rw-note { color: var(--ink-2); font-size: 0.78rem; margin-top: 4px; font-style: italic; }
@@ -314,6 +315,7 @@
     </select>
   </div>
   <button id="scanBtn">Scan</button>
+  <button class="secondary" id="huntBtn" title="Preset: micro-cap (&lt;$1M), under 24h old, sorted by crowd arrival — the observable profile coins have before big runs. No preset predicts winners.">🎯 Early hunt</button>
 </div>
 
 <div class="single">
@@ -714,6 +716,18 @@ function loreAssess(t) {
   return { score: Math.round(score), pts };
 }
 
+// The observable pre-explosion profile: cleared the rug check, momentum fresh
+// but the move still small, crowd arriving, micro-cap. Coins that later 100x
+// mostly looked like this — but so do many that die; it's a hunting ground,
+// not a prediction.
+function isSetup(t) {
+  const cap = t.pair.marketCap != null ? t.pair.marketCap : t.pair.fdv;
+  return t.verdict === "pass" &&
+    t.runway && t.runway.phase === "early" &&
+    t.trend && (t.trend.score || 0) >= 60 &&
+    cap > 0 && cap < 1e6;
+}
+
 function loreHtml(t) {
   const lo = t.lore || (t.lore = loreAssess(t));
   if (lo.score == null) return "";
@@ -987,6 +1001,7 @@ function tokenCard(t) {
           (t.research ? '<span>Research <b>' + t.research.filter((p) => p.ok).length + "/" + t.research.length + '</b></span>' : "") +
           (() => { const p = PHASE_BADGE[(t.runway || (t.runway = runwayAssess(t.pair))).phase];
                    return '<span class="phase ' + p.cls + '">' + p.text + '</span>'; })() +
+          (isSetup(t) ? '<span class="phase ph-setup" title="PASS + EARLY + trend ≥ 60 + micro-cap: the pre-run profile. Not a prediction.">⭐ SETUP</span>' : "") +
         '</div>' +
       '</div>' +
       '<div class="card-body">' + cardBody(t) + '</div>' +
@@ -1235,8 +1250,10 @@ async function runScan() {
 
     const cautions = filtered.filter((t) => t.verdict === "caution").length;
     const fails = filtered.filter((t) => t.verdict === "fail").length;
+    const setups = filtered.filter(isSetup).length;
     setStatus("Done" + (usedFallback ? " (via GeckoTerminal fallback)" : "") + ": " +
       passed + " passed, " + cautions + " caution, " + fails + " failed" +
+      (setups ? " — ⭐ " + setups + " match the early-hunt profile" : "") +
       (truncated ? " — top " + MAX_RUGCHECKS + " by current sort checked, " + truncated + " more met filters" : "") + ".");
   } catch (e) {
     setStatus(describeError(e, "scanning"), "error");
@@ -1306,6 +1323,15 @@ async function checkSingle() {
 }
 
 $("scanBtn").addEventListener("click", runScan);
+$("huntBtn").addEventListener("click", () => {
+  $("minLiq").value = 5000;
+  $("minVol").value = 5000;
+  $("maxAge").value = 24;
+  $("minMcap").value = 20000;
+  $("maxMcap").value = 1000000;
+  $("sortBy").value = "trend";
+  runScan();
+});
 $("checkBtn").addEventListener("click", checkSingle);
 $("mintInput").addEventListener("keydown", (e) => { if (e.key === "Enter") checkSingle(); });
 </script>
