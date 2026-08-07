@@ -328,8 +328,7 @@
   </div>
   <button id="scanBtn">Scan</button>
   <button class="secondary" id="huntBtn" title="Preset: micro-cap (&lt;$1M), under 24h old, sorted by crowd arrival — the observable profile coins have before big runs. No preset predicts winners.">🎯 Early hunt</button>
-  <button class="secondary" id="pumpBtn" title="Preset tuned to pump.fun bonding-curve economics: curve holds $1K-$6K liquidity and FDV sits under ~$70K until graduation, so normal floors would exclude every pre-graduation coin.">🚀 Pump hunt</button>
-  <label class="chk" title="Include pump.fun bonding-curve tokens (pre-graduation), via GeckoTerminal's index"><input type="checkbox" id="pumpFeed" checked> Pump.fun feed</label>
+  <label class="chk" title="Include pump.fun bonding-curve tokens (pre-graduation), via GeckoTerminal's index. Curve coins are judged at curve scale: min liquidity/mcap floors don't apply to them, since the curve holds only $1K-$6K by design."><input type="checkbox" id="pumpFeed" checked> Pump.fun feed</label>
 </div>
 
 <div class="single">
@@ -1297,6 +1296,11 @@ async function runScan() {
     let filtered = withPairs.filter((t) => {
       const ageH = t.pair.createdAt ? (now - t.pair.createdAt) / 3.6e6 : Infinity;
       const mcap = t.pair.marketCap != null ? t.pair.marketCap : (t.pair.fdv != null ? t.pair.fdv : 0);
+      // Bonding-curve coins live at a different scale (curve holds $1K-$6K,
+      // FDV < ~$70K until graduation) — min liquidity/mcap floors would
+      // structurally exclude all of them, so only volume/age/max-mcap apply.
+      const bonding = t.pumpfun && (t.curve ? !t.curve.complete : t.pair.liquidity < 10000);
+      if (bonding) return t.pair.volume24 >= minVol && ageH <= maxAgeH && mcap <= maxMcap;
       return t.pair.liquidity >= minLiq && t.pair.volume24 >= minVol && ageH <= maxAgeH &&
         mcap >= minMcap && mcap <= maxMcap;
     });
@@ -1474,17 +1478,6 @@ $("huntBtn").addEventListener("click", () => {
   $("maxAge").value = 24;
   $("minMcap").value = 20000;
   $("maxMcap").value = 1000000;
-  $("sortBy").value = "trend";
-  runScan();
-});
-$("pumpBtn").addEventListener("click", () => {
-  // bonding-curve scale: the curve holds ~$1K-$6K and FDV < ~$70K pre-graduation
-  $("pumpFeed").checked = true;
-  $("minLiq").value = 1000;
-  $("minVol").value = 5000;
-  $("maxAge").value = 24;
-  $("minMcap").value = 2000;
-  $("maxMcap").value = 70000;
   $("sortBy").value = "trend";
   runScan();
 });
