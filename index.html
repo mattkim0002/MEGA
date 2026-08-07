@@ -226,6 +226,23 @@
     font-variant-numeric: tabular-nums;
   }
   .metrics b { color: var(--ink); font-weight: 600; }
+  .head-badges { display: flex; align-items: center; gap: 6px; }
+  .grade {
+    font-size: 0.8rem;
+    font-weight: 800;
+    width: 22px; height: 22px;
+    border-radius: 6px;
+    border: 1px solid;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+  }
+  .g-A { color: var(--good); border-color: var(--good); }
+  .g-B { color: var(--accent); border-color: var(--accent); }
+  .g-C { color: var(--warn); border-color: var(--warn); }
+  .g-D { color: #ec835a; border-color: #ec835a; }
+  .g-F { color: var(--crit); border-color: var(--crit); background: rgba(208, 59, 59, 0.12); }
   .verdict {
     font-size: 0.72rem;
     font-weight: 700;
@@ -319,7 +336,8 @@
   <div class="field">
     <label for="sortBy">Sort by</label>
     <select id="sortBy">
-      <option value="heat" selected>Heat (momentum)</option>
+      <option value="grade" selected>Grade (signal quality)</option>
+      <option value="heat">Heat (momentum)</option>
       <option value="trend">Trend (engagement)</option>
       <option value="lore">Lore (story depth)</option>
       <option value="volume">24h volume</option>
@@ -346,8 +364,9 @@
   <a href="https://rugcheck.xyz" target="_blank" rel="noopener">RugCheck</a> (Solana) &middot;
   <a href="https://gopluslabs.io" target="_blank" rel="noopener">GoPlus</a> (EVM/Tron) &middot;
   fallback: <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">GeckoTerminal</a> (Solana only).
-  Not financial advice &mdash; a PASS only means no automated flags, and Heat measures current
-  activity (buy pressure, turnover, price action), not future performance.
+  Not financial advice &mdash; a PASS only means no automated flags, Heat measures current
+  activity (not future performance), and grades rank relative signal quality within a scan:
+  an A-grade memecoin is still a lottery ticket, just not a rigged one.
 </footer>
 
 <script>
@@ -764,6 +783,59 @@ function loreAssess(t) {
   return { score: Math.round(score), pts };
 }
 
+// Composite grade A-F: relative signal quality within this scan, weighted
+// toward risk evidence (security, holder research, exit depth) over activity.
+// Hard gates: FAIL verdict = F always; unknown verdict, thin exit depth, or
+// unvalidated pump curve cap the tier at C. NOT a buy list — most memecoins
+// go to zero regardless of grade; a good grade only means "not rigged".
+function gradeAssess(t) {
+  if (!t.verdict || t.verdict === "pending") return null;
+  if (t.verdict === "fail") return { tier: "F", score: 0 };
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  const cap = t.pair.marketCap != null ? t.pair.marketCap : (t.pair.fdv || 0);
+  const liq = t.pair.liquidity || 0;
+  let score = 0;
+  // 35: security verdict
+  score += t.verdict === "pass" ? 35 : t.verdict === "caution" ? 15 : 5;
+  // 25: deep-research checks (holders, concentration, LP lock, insiders)
+  if (t.research && t.research.length) {
+    score += 25 * t.research.filter((p) => p.ok).length / t.research.length;
+  }
+  // 15: exit depth — liquidity relative to mcap and in absolute terms
+  if (cap > 0) score += 7.5 * clamp01((liq / cap) / 0.08);
+  score += 7.5 * clamp01(liq / 10000);
+  // 5: structural validation (pump.fun curve traction, when applicable)
+  const curveValidated = !t.pumpfun || (t.curve && (t.curve.complete || t.curve.progress >= 15));
+  if (curveValidated) score += 5;
+  // 10: engagement, 5: momentum phase, 5: lore
+  if (t.trend && t.trend.score != null) score += 10 * t.trend.score / 100;
+  const phase = t.runway && t.runway.phase;
+  score += phase === "early" ? 5 : phase === "running" ? 3 : phase === "quiet" ? 2 : 0;
+  if (t.lore && t.lore.score != null) score += 5 * t.lore.score / 100;
+  // caps: unverified or hard-to-exit coins can't grade above C
+  let capTier = 100;
+  if (t.verdict === "unknown") capTier = 59;
+  if (!curveValidated) capTier = Math.min(capTier, 59);
+  if (liq < 1000 || (cap > 0 && liq / cap < 0.02)) capTier = Math.min(capTier, 59);
+  score = Math.min(Math.round(score), capTier);
+  const tier = score >= 75 ? "A" : score >= 60 ? "B" : score >= 40 ? "C" : "D";
+  return { tier, score };
+}
+
+const GRADE_TITLE = {
+  A: "A — strongest evidence stack in this scan (clean security, healthy structure, real exit depth). Still a lottery ticket: most memecoins go to zero regardless of grade. Not a buy recommendation.",
+  B: "B — decent signals with some gaps. Relative quality only — not a buy recommendation.",
+  C: "C — weak, unverified, or hard to exit. Relative quality only — not a buy recommendation.",
+  D: "D — high risk: poor signals across the board.",
+  F: "F — failed the security check. Avoid.",
+};
+
+function gradeHtml(t) {
+  const g = gradeAssess(t);
+  if (!g) return "";
+  return '<span class="grade g-' + g.tier + '" title="' + esc(GRADE_TITLE[g.tier]) + '">' + g.tier + '</span>';
+}
+
 // The observable pre-explosion profile: cleared the rug check, momentum fresh
 // but the move still small, crowd arriving, micro-cap. Coins that later 100x
 // mostly looked like this — but so do many that die; it's a hunting ground,
@@ -1093,7 +1165,7 @@ function tokenCard(t) {
             '<div class="nm">' + esc(t.pair.name) + '</div>' +
           '</div>' +
         '</div>' +
-        '<span class="verdict ' + badge.cls + '">' + badge.text + '</span>' +
+        '<span class="head-badges">' + gradeHtml(t) + '<span class="verdict ' + badge.cls + '">' + badge.text + '</span></span>' +
         '<div class="metrics">' +
           '<span>Liq <b>' + fmtUsd(t.pair.liquidity) + '</b></span>' +
           '<span>Vol24h <b>' + fmtUsd(t.pair.volume24) + '</b></span>' +
@@ -1311,7 +1383,9 @@ async function runScan() {
       t.lore = loreAssess(t);
     }
     if (sortBy === "heat") filtered.sort((a, b) => b.heat - a.heat);
-    else if (sortBy === "trend") filtered.sort((a, b) => (b.trend.score || 0) - (a.trend.score || 0));
+    else if (sortBy === "trend" || sortBy === "grade") filtered.sort((a, b) => (b.trend.score || 0) - (a.trend.score || 0));
+    // grade sort starts as a trend sort — grades need the security/research
+    // results, so the list re-ranks itself once all checks are done
     else if (sortBy === "lore") filtered.sort((a, b) => (b.lore.score || 0) - (a.lore.score || 0));
     else if (sortBy === "newest") filtered.sort((a, b) => (b.pair.createdAt || 0) - (a.pair.createdAt || 0));
     else filtered.sort((a, b) => b.pair.volume24 - a.pair.volume24);
@@ -1395,6 +1469,15 @@ async function runScan() {
       rerenderCard(t, resultsEl);
       // only RugCheck report calls need pacing; EVM research reads cached GoPlus data
       if (t.chain === "solana" && i + 1 < toResearch.length) await sleep(RUGCHECK_DELAY_MS);
+    }
+
+    // Final re-rank by grade now that every signal is in
+    if (sortBy === "grade") {
+      filtered.sort((a, b) => {
+        const ga = gradeAssess(a), gb = gradeAssess(b);
+        return (gb ? gb.score : -1) - (ga ? ga.score : -1);
+      });
+      resultsEl.innerHTML = filtered.map(tokenCard).join("");
     }
 
     const cautions = filtered.filter((t) => t.verdict === "caution").length;
