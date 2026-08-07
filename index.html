@@ -524,6 +524,7 @@ function geckoPoolToToken(pool) {
     mint,
     chain: "solana",
     boosted: false,
+    poolAddress: a.address,
     geckoPair: {
       chain: "solana",
       symbol: nameParts[0] || mint.slice(0, 6),
@@ -582,6 +583,7 @@ async function discoverPumpFun() {
       if (!t || seen.has(t.mint)) continue;
       seen.add(t.mint);
       t.pumpfun = true;
+      t.curveAddress = t.poolAddress; // pump.fun "pool" IS the bonding curve account
       tokens.push(t);
     }
   }
@@ -769,6 +771,9 @@ function loreAssess(t) {
 // not a prediction.
 function isSetup(t) {
   const cap = t.pair.marketCap != null ? t.pair.marketCap : t.pair.fdv;
+  // pump.fun coins must also show validated on-chain curve traction —
+  // no curve data means unvalidated, which means no star
+  if (t.pumpfun && !(t.curve && (t.curve.complete || t.curve.progress >= 15))) return false;
   return t.verdict === "pass" &&
     t.runway && t.runway.phase === "early" &&
     t.trend && (t.trend.score || 0) >= 60 &&
@@ -855,6 +860,64 @@ function pctHtml(label, v) {
   const cls = v > 0 ? "up" : v < 0 ? "down" : "";
   const sign = v > 0 ? "+" : "";
   return '<span>' + label + ' <b class="' + cls + '">' + sign + v.toFixed(1) + '%</b></span>';
+}
+
+/* ---------- pump.fun on-chain curve validation ---------- */
+
+const SOLANA_RPC = "https://solana-rpc.publicnode.com";
+const PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+const CURVE_INITIAL_REAL_TOKENS = 793_100_000_000_000; // 793.1M tokens * 1e6
+
+// Read bonding-curve accounts straight from pump.fun's on-chain program via
+// batched RPC calls (public RPC caps getMultipleAccounts at ~10 addresses).
+// This is ground truth — curve progress and real SOL raised can't be faked
+// the way chart activity can. Mutates tokens with t.curve.
+async function fetchPumpCurves(tokens) {
+  for (let i = 0; i < tokens.length; i += 10) {
+    const chunk = tokens.slice(i, i + 10);
+    if (i > 0) await sleep(350);
+    let res;
+    try {
+      res = await fetch(SOLANA_RPC, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 1, method: "getMultipleAccounts",
+          params: [chunk.map((t) => t.curveAddress), { encoding: "base64" }],
+        }),
+      });
+    } catch (e) {
+      throw new NetworkError("Solana RPC");
+    }
+    if (res.status === 429) throw new RateLimitError("Solana RPC");
+    if (!res.ok) throw new HttpError("Solana RPC", res.status);
+    const data = await res.json();
+    const accounts = (data.result && data.result.value) || [];
+    chunk.forEach((t, j) => {
+      const acct = accounts[j];
+      if (!acct || acct.owner !== PUMP_PROGRAM || !acct.data) return;
+      const raw = Uint8Array.from(atob(acct.data[0]), (c) => c.charCodeAt(0));
+      if (raw.length < 49) return;
+      const dv = new DataView(raw.buffer);
+      const realToken = Number(dv.getBigUint64(24, true));
+      const realSol = Number(dv.getBigUint64(32, true)) / 1e9;
+      const complete = raw[48] === 1;
+      const progress = complete ? 100 : Math.max(0, Math.min(100, 100 * (1 - realToken / CURVE_INITIAL_REAL_TOKENS)));
+      t.curve = { progress, solRaised: realSol, complete };
+    });
+  }
+}
+
+function curvePoints(c) {
+  const pts = [];
+  if (c.complete) {
+    pts.push({ ok: true, text: "curve complete — graduated off the bonding curve" });
+  } else {
+    pts.push({ ok: c.progress >= 15, text: "curve " + c.progress.toFixed(1) + "% sold — " +
+      (c.progress < 15 ? "barely started (most curves die here)" : c.progress > 80 ? "near graduation" : "real traction") });
+    pts.push({ ok: c.solRaised >= 10, text: c.solRaised.toFixed(1) + " SOL of ~85 committed by buyers (on-chain)" });
+  }
+  return pts;
 }
 
 /* ---------- security checks: RugCheck (Solana) + GoPlus (EVM/Tron) ---------- */
@@ -1046,6 +1109,7 @@ function tokenCard(t) {
           loreHtml(t) +
           (t.holders != null ? '<span>Holders <b>' + t.holders.toLocaleString() + '</b></span>' : "") +
           (t.research ? '<span>Research <b>' + t.research.filter((p) => p.ok).length + "/" + t.research.length + '</b></span>' : "") +
+          (t.curve ? '<span>Curve <b>' + (t.curve.complete ? "grad" : t.curve.progress.toFixed(0) + "%") + '</b></span>' : "") +
           (() => { const p = PHASE_BADGE[(t.runway || (t.runway = runwayAssess(t.pair))).phase];
                    return '<span class="phase ' + p.cls + '">' + p.text + '</span>'; })() +
           (isSetup(t) ? '<span class="phase ph-setup" title="PASS + EARLY + trend ≥ 60 + micro-cap: the pre-run profile. Not a prediction.">⭐ SETUP</span>' : "") +
@@ -1077,7 +1141,14 @@ function cardBody(t) {
   const sigRow = (p) =>
     '<div class="risk"><span class="lvl ' + (p.ok ? "rw-ok" : "rw-no") + '">' + (p.ok ? "✓" : "✕") + '</span>' +
     '<span class="desc">' + esc(p.text) + '</span></div>';
-  const rwHtml = '<div class="rw">' +
+  const curveHtml = t.curve
+    ? '<div class="rw">' +
+      '<div class="rw-head">Pump.fun curve — on-chain validation</div>' +
+      curvePoints(t.curve).map(sigRow).join("") +
+      '<div class="rw-note">Read directly from the bonding-curve account — buyers’ committed SOL, not chart activity.</div>' +
+      '</div>'
+    : (t.pumpfun ? '<div class="rw"><div class="rw-head">Pump.fun curve</div><div class="rw-note">Curve state unavailable (RPC unreachable) — traction unvalidated.</div></div>' : "");
+  const rwHtml = curveHtml + '<div class="rw">' +
     '<div class="rw-head">Run-room signals — heuristic, not a prediction</div>' +
     rw.pts.map(sigRow).join("") +
     '<div class="rw-note">' + esc(rw.note) + '</div>' +
@@ -1202,6 +1273,18 @@ async function runScan() {
         .filter((t) => t.pair);
     }
     setFunnel(tokens.length, withPairs.length, null, null);
+
+    // On-chain curve validation for pump.fun tokens (one batched RPC call)
+    const curveToks = withPairs.filter((t) => t.pumpfun && t.curveAddress);
+    if (curveToks.length) {
+      setStatus("Validating " + curveToks.length + " pump.fun curves on-chain…", "", true);
+      try {
+        await fetchPumpCurves(curveToks);
+      } catch (e) {
+        setStatus(describeError(e, "reading bonding curves") + " Continuing without curve validation…", "warn", true);
+        await sleep(800);
+      }
+    }
 
     // 3. Filters
     const minLiq = parseFloat($("minLiq").value) || 0;
