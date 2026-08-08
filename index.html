@@ -811,11 +811,18 @@ function gradeAssess(t) {
   // 5: structural validation (pump.fun curve traction, when applicable)
   const curveValidated = !t.pumpfun || (t.curve && (t.curve.complete || t.curve.progress >= 15));
   if (curveValidated) score += 5;
-  // 10: engagement, 5: momentum phase, 5: lore
-  if (t.trend && t.trend.score != null) score += 10 * t.trend.score / 100;
-  const phase = t.runway && t.runway.phase;
-  score += phase === "early" ? 5 : phase === "running" ? 3 : phase === "quiet" ? 2 : 0;
-  if (t.lore && t.lore.score != null) score += 5 * t.lore.score / 100;
+  // 20: activity, weighted by lifecycle stage. Early coins have no track
+  // record, so story + real trading volume carry the signal; established
+  // coins (incl. dip-recovery candidates) live on whether the crowd returns.
+  const ageH = t.pair.createdAt ? (Date.now() - t.pair.createdAt) / 3.6e6 : Infinity;
+  const isEarlyStage = ageH < 24 || (t.pumpfun && t.curve && !t.curve.complete);
+  const volFrac = 0.5 * clamp01((t.pair.volume24 || 0) / 50000) +
+                  0.5 * (cap > 0 ? clamp01(((t.pair.volume24 || 0) / cap) / 2) : 0);
+  const loreFrac = t.lore && t.lore.score != null ? t.lore.score / 100 : 0;
+  const trendFrac = t.trend && t.trend.score != null ? t.trend.score / 100 : 0;
+  score += isEarlyStage
+    ? 8 * loreFrac + 8 * volFrac + 4 * trendFrac
+    : 10 * trendFrac + 8 * volFrac + 2 * loreFrac;
   // caps: unverified or hard-to-exit coins can't grade above C
   let capTier = 100;
   if (t.verdict === "unknown") capTier = 59;
@@ -1596,7 +1603,7 @@ $("recoveryBtn").addEventListener("click", () => {
   $("maxAge").value = 168;
   $("minMcap").value = 300000;
   $("maxMcap").value = 1000000;
-  $("sortBy").value = "lore";
+  $("sortBy").value = "grade";
   runScan();
 });
 $("huntBtn").addEventListener("click", () => {
@@ -1605,7 +1612,7 @@ $("huntBtn").addEventListener("click", () => {
   $("maxAge").value = 24;
   $("minMcap").value = 20000;
   $("maxMcap").value = 1000000;
-  $("sortBy").value = "trend";
+  $("sortBy").value = "grade";
   runScan();
 });
 $("checkBtn").addEventListener("click", checkSingle);
