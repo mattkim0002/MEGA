@@ -589,6 +589,30 @@ async function discoverViaFallback() {
   return tokens;
 }
 
+// Established coins: GeckoTerminal trending + top-volume Solana pools.
+// The latest-profiles/boosts feeds skew to coins hours old, so recovery-style
+// scans (max age > 48h) need this older pool to differ from early hunts.
+async function discoverEstablished() {
+  const tokens = [];
+  const seen = new Set();
+  const urls = [
+    "https://api.geckoterminal.com/api/v2/networks/solana/trending_pools?page=1",
+    "https://api.geckoterminal.com/api/v2/networks/solana/trending_pools?page=2",
+    "https://api.geckoterminal.com/api/v2/networks/solana/pools?page=1&sort=h24_volume_usd_desc",
+  ];
+  for (let i = 0; i < urls.length; i++) {
+    if (i) await sleep(300);
+    const data = await fetchJson(urls[i], "GeckoTerminal (trending)");
+    for (const pool of (data && data.data) || []) {
+      const t = geckoPoolToToken(pool);
+      if (!t || seen.has(t.mint)) continue;
+      seen.add(t.mint);
+      tokens.push(t);
+    }
+  }
+  return tokens;
+}
+
 // Pump.fun bonding-curve tokens (pre-graduation), via GeckoTerminal's
 // pump-fun dex index — pump.fun's own API blocks browsers.
 async function discoverPumpFun() {
@@ -616,7 +640,17 @@ async function discoverPumpFun() {
 function pairFromDex(p, fallbackChain) {
   const mint = p.baseToken && p.baseToken.address;
   const chain = p.chainId || fallbackChain;
+  // Social/branding data from the pair listing — lets tokens that didn't come
+  // through the profiles feed (trending, pump.fun) still earn a lore reading
+  const info = p.info || {};
+  const linkTypes = new Set();
+  for (const w of info.websites || []) linkTypes.add("website");
+  for (const s of info.socials || []) linkTypes.add(((s.type || "link") + "").toLowerCase());
+  const infoProfile = (linkTypes.size || info.header || info.imageUrl)
+    ? { description: "", linkTypes, hasHeader: !!info.header, hasIcon: !!info.imageUrl, cto: false }
+    : null;
   return {
+    infoProfile,
     chain,
     symbol: (p.baseToken.symbol || "").trim() || mint.slice(0, 6),
     name: p.baseToken.name || "",
@@ -1351,6 +1385,24 @@ async function runScan() {
         await sleep(800);
       }
     }
+    // Recovery-style scans (max age > 48h) also pull established coins —
+    // the latest feeds only contain fresh launches, so without this pool an
+    // older-age window would return the same coins as an early hunt
+    if (!usedFallback && (parseFloat($("maxAge").value) || 0) > 48) {
+      setStatus("Adding established coins (GeckoTerminal trending + top volume)…", "", true);
+      try {
+        const est = await discoverEstablished();
+        const known = new Set(tokens.map((t) => tokenKey(t.chain, t.mint)));
+        for (const e of est) {
+          if (known.has(tokenKey(e.chain, e.mint))) continue;
+          known.add(tokenKey(e.chain, e.mint));
+          tokens.push(e);
+        }
+      } catch (e) {
+        setStatus(describeError(e, "loading established coins") + " Continuing without them…", "warn", true);
+        await sleep(800);
+      }
+    }
     setFunnel(tokens.length, null, null, null);
     if (tokens.length === 0) {
       setStatus("No Solana tokens in the latest DexScreener feed right now. Try again shortly.", "warn");
@@ -1367,6 +1419,9 @@ async function runScan() {
       withPairs = tokens
         .map((t) => ({ ...t, pair: market.get(tokenKey(t.chain, t.mint)) || t.geckoPair }))
         .filter((t) => t.pair);
+      // tokens without a profiles-feed entry still get lore signals from
+      // the pair listing's social/branding info
+      for (const t of withPairs) if (!t.profile && t.pair.infoProfile) t.profile = t.pair.infoProfile;
     }
     setFunnel(tokens.length, withPairs.length, null, null);
 
