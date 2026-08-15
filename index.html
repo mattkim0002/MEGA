@@ -533,23 +533,29 @@ async function discoverTokens() {
 // Map a GeckoTerminal pool object to a token with a pair built from the pool
 // attributes (stored as geckoPair — used directly in fallback mode, or as a
 // backstop when DexScreener has no pair for the mint yet).
-function geckoPoolToToken(pool) {
+const WRAPPED_NATIVES = new Set([
+  "So11111111111111111111111111111111111111112",           // WSOL
+  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",            // WBNB
+  "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",            // WETH
+]);
+
+function geckoPoolToToken(pool, geckoNet = "solana", chain = "solana") {
   const a = pool.attributes || {};
   const rel = pool.relationships || {};
   const baseId = rel.base_token && rel.base_token.data && rel.base_token.data.id;
-  if (!baseId) return null;
-  const mint = baseId.replace(/^solana_/, "");
-  if (mint === "So11111111111111111111111111111111111111112") return null;
+  if (!baseId || !baseId.startsWith(geckoNet + "_")) return null;
+  const mint = baseId.slice(geckoNet.length + 1);
+  if (WRAPPED_NATIVES.has(mint.toLowerCase()) || WRAPPED_NATIVES.has(mint)) return null;
   const nameParts = (a.name || "").split(" / ");
   const pc = a.price_change_percentage || {};
   const tx = (a.transactions && a.transactions.h24) || {};
   return {
     mint,
-    chain: "solana",
+    chain,
     boosted: false,
     poolAddress: a.address,
     geckoPair: {
-      chain: "solana",
+      chain,
       symbol: nameParts[0] || mint.slice(0, 6),
       name: a.name || "",
       icon: null,
@@ -565,7 +571,7 @@ function geckoPoolToToken(pool) {
       sells: tx.sells != null ? tx.sells : null,
       buys1h: a.transactions && a.transactions.h1 ? a.transactions.h1.buys : null,
       sells1h: a.transactions && a.transactions.h1 ? a.transactions.h1.sells : null,
-      url: "https://www.geckoterminal.com/solana/pools/" + a.address,
+      url: "https://www.geckoterminal.com/" + geckoNet + "/pools/" + a.address,
     },
   };
 }
@@ -596,18 +602,21 @@ async function discoverViaFallback() {
 async function discoverEstablished() {
   const tokens = [];
   const seen = new Set();
-  const urls = [
-    "https://api.geckoterminal.com/api/v2/networks/solana/trending_pools?page=1",
-    "https://api.geckoterminal.com/api/v2/networks/solana/trending_pools?page=2",
-    "https://api.geckoterminal.com/api/v2/networks/solana/pools?page=1&sort=h24_volume_usd_desc",
+  const sources = [
+    { url: "https://api.geckoterminal.com/api/v2/networks/solana/trending_pools?page=1", net: "solana", chain: "solana" },
+    { url: "https://api.geckoterminal.com/api/v2/networks/solana/trending_pools?page=2", net: "solana", chain: "solana" },
+    { url: "https://api.geckoterminal.com/api/v2/networks/solana/pools?page=1&sort=h24_volume_usd_desc", net: "solana", chain: "solana" },
+    { url: "https://api.geckoterminal.com/api/v2/networks/bsc/trending_pools?page=1", net: "bsc", chain: "bsc" },
+    { url: "https://api.geckoterminal.com/api/v2/networks/bsc/pools?page=1&sort=h24_volume_usd_desc", net: "bsc", chain: "bsc" },
   ];
-  for (let i = 0; i < urls.length; i++) {
+  for (let i = 0; i < sources.length; i++) {
     if (i) await sleep(300);
-    const data = await fetchJson(urls[i], "GeckoTerminal (trending)");
+    const s = sources[i];
+    const data = await fetchJson(s.url, "GeckoTerminal (trending)");
     for (const pool of (data && data.data) || []) {
-      const t = geckoPoolToToken(pool);
-      if (!t || seen.has(t.mint)) continue;
-      seen.add(t.mint);
+      const t = geckoPoolToToken(pool, s.net, s.chain);
+      if (!t || seen.has(t.chain + ":" + t.mint)) continue;
+      seen.add(t.chain + ":" + t.mint);
       tokens.push(t);
     }
   }
