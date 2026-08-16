@@ -347,8 +347,8 @@
     </select>
   </div>
   <button id="scanBtn">Scan</button>
-  <button class="secondary" id="huntBtn" title="Preset: micro-cap (&lt;$1M), under 24h old, sorted by crowd arrival — the observable profile coins have before big runs. No preset predicts winners.">🎯 Early hunt</button>
-  <button class="secondary" id="recoveryBtn" title="Preset: $300K-$1M mcap, up to 7 days old, sorted by narrative strength. Coins matching the full rebound shape (sold off 20%+ over 24h, turning up in the last hour with buyers back, lore >= 40) get a REBOUND SHAPE badge. The shape is not a probability — most dipped coins keep falling.">🔄 Recovery</button>
+  <button class="secondary" id="huntBtn" title="Early-launch mode: fills sensible defaults the first time (micro-cap, under 24h), then remembers whatever filters you set while in this mode — your edits never revert. No preset predicts winners.">🎯 Early hunt</button>
+  <button class="secondary" id="recoveryBtn" title="Recovery mode: fills sensible defaults the first time ($300K-$1M, up to 7 days, established coins included), then remembers whatever filters you set while in this mode — your edits never revert. Rebound-shape coins get a badge; the shape is not a probability.">🔄 Recovery</button>
   <label class="chk" title="Include pump.fun bonding-curve tokens (pre-graduation), via GeckoTerminal's index. Curve coins are judged at curve scale: min liquidity/mcap floors don't apply to them, since the curve holds only $1K-$6K by design."><input type="checkbox" id="pumpFeed" checked> Pump.fun feed</label>
   <label class="chk" title="After all checks finish, only keep coins graded A or B: PASS verdict, strong holder/LP research, real exit depth, validated traction. Most scans will show few or none — an empty list means nothing met the evidence bar, which is the protection working."><input type="checkbox" id="strictMode" checked> Strict mode</label>
 </div>
@@ -1660,26 +1660,52 @@ async function checkSingle() {
   }
 }
 
-$("scanBtn").addEventListener("click", runScan);
-$("recoveryBtn").addEventListener("click", () => {
-  // the user-observed pattern: 300K-1M mcap, story coins, old enough to have sold off
-  $("minLiq").value = 10000;
-  $("minVol").value = 10000;
-  $("maxAge").value = 168;
-  $("minMcap").value = 300000;
-  $("maxMcap").value = 1000000;
-  $("sortBy").value = "grade";
-  runScan();
-});
-$("huntBtn").addEventListener("click", () => {
-  $("minLiq").value = 5000;
-  $("minVol").value = 5000;
-  $("maxAge").value = 24;
-  $("minMcap").value = 20000;
-  $("maxMcap").value = 1000000;
-  $("sortBy").value = "grade";
-  runScan();
-});
+$("scanBtn").addEventListener("click", () => { saveSettings(); runScan(); });
+/* ---------- sticky settings: filters persist, presets remember your edits ---------- */
+
+const SETTINGS_KEY = "launch-screener-settings-v1";
+const FIELD_IDS = ["minLiq", "minVol", "maxAge", "minMcap", "maxMcap", "sortBy"];
+const CHECK_IDS = ["pumpFeed", "strictMode"];
+// Templates apply only the FIRST time a mode is used — after that, each mode
+// remembers whatever you last set while in it and never reverts your values.
+const MODE_TEMPLATES = {
+  early:    { minLiq: 5000,  minVol: 5000,  maxAge: 24,  minMcap: 20000,  maxMcap: 1000000, sortBy: "grade" },
+  recovery: { minLiq: 10000, minVol: 10000, maxAge: 168, minMcap: 300000, maxMcap: 1000000, sortBy: "grade" },
+};
+let currentMode = "scan";
+
+function loadSettings() {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch (e) { return {}; }
+}
+function saveSettings() {
+  const s = loadSettings();
+  s.modes = s.modes || {};
+  s.modes[currentMode] = Object.fromEntries(FIELD_IDS.map((id) => [id, $(id).value]));
+  s.checks = Object.fromEntries(CHECK_IDS.map((id) => [id, $(id).checked]));
+  s.lastMode = currentMode;
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) { /* private browsing */ }
+}
+function applyValues(vals) {
+  if (!vals) return;
+  for (const id of FIELD_IDS) if (vals[id] != null) $(id).value = vals[id];
+}
+function enterMode(mode) {
+  currentMode = mode;
+  const s = loadSettings();
+  applyValues((s.modes && s.modes[mode]) || MODE_TEMPLATES[mode]);
+  saveSettings();
+}
+// restore last session's values on load
+(function restoreSettings() {
+  const s = loadSettings();
+  currentMode = s.lastMode || "scan";
+  if (s.modes && s.modes[currentMode]) applyValues(s.modes[currentMode]);
+  if (s.checks) for (const id of CHECK_IDS) if (s.checks[id] != null) $(id).checked = s.checks[id];
+})();
+for (const id of FIELD_IDS.concat(CHECK_IDS)) $(id).addEventListener("change", saveSettings);
+
+$("recoveryBtn").addEventListener("click", () => { enterMode("recovery"); runScan(); });
+$("huntBtn").addEventListener("click", () => { enterMode("early"); runScan(); });
 $("checkBtn").addEventListener("click", checkSingle);
 $("mintInput").addEventListener("keydown", (e) => { if (e.key === "Enter") checkSingle(); });
 </script>
