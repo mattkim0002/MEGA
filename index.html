@@ -367,7 +367,7 @@
   <button id="scanBtn">Scan</button>
   <button class="secondary" id="huntBtn" title="Early-launch mode: fills sensible defaults the first time (micro-cap, under 24h), then remembers whatever filters you set while in this mode — your edits never revert. No preset predicts winners.">🎯 Early hunt</button>
   <button class="secondary" id="recoveryBtn" title="Recovery mode: fills sensible defaults the first time ($300K-$1M, up to 7 days, established coins included), then remembers whatever filters you set while in this mode — your edits never revert. Rebound-shape coins get a badge; the shape is not a probability.">🔄 Recovery</button>
-  <label class="chk" title="Include pump.fun bonding-curve tokens (pre-graduation), via GeckoTerminal's index. Curve coins are judged at curve scale: min liquidity/mcap floors don't apply to them, since the curve holds only $1K-$6K by design."><input type="checkbox" id="pumpFeed" checked> Pump.fun feed</label>
+  <label class="chk" title="Include launchpad bonding-curve tokens: pump.fun (Solana) and four.meme (BSC), plus the freshest BSC pools. Curve coins are judged at curve scale: min liquidity/mcap floors don't apply to them, since curves hold only $1K-$6K by design."><input type="checkbox" id="pumpFeed" checked> Launchpads (pump.fun + four.meme)</label>
   <label class="chk" title="After all checks finish, only keep coins graded A or B: PASS verdict, strong holder/LP research, real exit depth, validated traction. Most scans will show few or none — an empty list means nothing met the evidence bar, which is the protection working."><input type="checkbox" id="strictMode" checked> Strict mode</label>
 </div>
 
@@ -502,6 +502,17 @@ const CHAIN_INFO = {
 
 const tokenKey = (chain, addr) => chain + ":" + addr.toLowerCase();
 
+// GeckoTerminal throttles bursts hard — retry once after a backoff on 429
+async function fetchJsonPaced(url, source) {
+  try {
+    return await fetchJson(url, source);
+  } catch (e) {
+    if (!(e instanceof RateLimitError)) throw e;
+    await sleep(2500);
+    return fetchJson(url, source);
+  }
+}
+
 // Primary discovery: DexScreener token-profiles + token-boosts (all chains)
 async function discoverTokens() {
   const [profiles, boosts] = await Promise.all([
@@ -629,13 +640,42 @@ async function discoverEstablished() {
     { url: "https://api.geckoterminal.com/api/v2/networks/bsc/pools?page=1&sort=h24_volume_usd_desc", net: "bsc", chain: "bsc" },
   ];
   for (let i = 0; i < sources.length; i++) {
-    if (i) await sleep(300);
+    if (i) await sleep(600);
     const s = sources[i];
-    const data = await fetchJson(s.url, "GeckoTerminal (trending)");
+    let data;
+    try { data = await fetchJsonPaced(s.url, "GeckoTerminal (trending)"); }
+    catch (e) { continue; } // keep whatever sources succeeded
     for (const pool of (data && data.data) || []) {
       const t = geckoPoolToToken(pool, s.net, s.chain);
       if (!t || seen.has(t.chain + ":" + t.mint)) continue;
       seen.add(t.chain + ":" + t.mint);
+      tokens.push(t);
+    }
+  }
+  return tokens;
+}
+
+// BSC launchpad feed: four.meme bonding pools (BSC's pump.fun — currently the
+// larger launchpad) plus the freshest BSC pools of any dex.
+async function discoverBscLaunches() {
+  const tokens = [];
+  const seen = new Set();
+  const urls = [
+    "https://api.geckoterminal.com/api/v2/networks/bsc/dexes/four-meme/pools?page=1",
+    "https://api.geckoterminal.com/api/v2/networks/bsc/dexes/four-meme/pools?page=2",
+    "https://api.geckoterminal.com/api/v2/networks/bsc/new_pools?page=1",
+  ];
+  for (let i = 0; i < urls.length; i++) {
+    if (i) await sleep(600);
+    let data;
+    try { data = await fetchJsonPaced(urls[i], "GeckoTerminal (four.meme)"); }
+    catch (e) { continue; } // keep whatever pages succeeded
+    for (const pool of (data && data.data) || []) {
+      const t = geckoPoolToToken(pool, "bsc", "bsc");
+      if (!t || seen.has(t.mint)) continue;
+      seen.add(t.mint);
+      const dex = pool.relationships && pool.relationships.dex && pool.relationships.dex.data;
+      if (dex && dex.id === "four-meme") t.fourmeme = true;
       tokens.push(t);
     }
   }
@@ -648,11 +688,14 @@ async function discoverPumpFun() {
   const tokens = [];
   const seen = new Set();
   for (let page = 1; page <= 2; page++) {
-    if (page > 1) await sleep(300);
-    const data = await fetchJson(
-      "https://api.geckoterminal.com/api/v2/networks/solana/dexes/pump-fun/pools?page=" + page,
-      "GeckoTerminal (pump.fun)"
-    );
+    if (page > 1) await sleep(600);
+    let data;
+    try {
+      data = await fetchJsonPaced(
+        "https://api.geckoterminal.com/api/v2/networks/solana/dexes/pump-fun/pools?page=" + page,
+        "GeckoTerminal (pump.fun)"
+      );
+    } catch (e) { continue; } // keep whatever pages succeeded
     for (const pool of (data && data.data) || []) {
       const t = geckoPoolToToken(pool);
       if (!t || seen.has(t.mint)) continue;
@@ -860,8 +903,10 @@ function detectNarratives(tokens) {
   tokens.forEach((t, i) => {
     const text = ((t.pair.symbol || "") + " " + (t.pair.name || "") + " " +
       ((t.profile && t.profile.description) || "")).toLowerCase();
-    const words = new Set(text.split(/[^a-z0-9]+/).filter((w) =>
-      w.length >= 3 && !NARRATIVE_STOPWORDS.has(w) && !/^\d+$/.test(w)));
+    // latin terms of 3+ chars, plus CJK runs of 2+ chars — the BNB meta is
+    // substantially Chinese-language and must not be tokenized away
+    const words = new Set((text.match(/[a-z0-9]{3,}|[一-鿿]{2,}/g) || []).filter((w) =>
+      !NARRATIVE_STOPWORDS.has(w) && !/^\d+$/.test(w)));
     for (const w of words) {
       if (!termMap.has(w)) termMap.set(w, new Set());
       termMap.get(w).add(i);
@@ -1305,7 +1350,7 @@ function tokenCard(t) {
         '<div class="tok-id">' +
           (t.pair.icon ? '<img src="' + esc(t.pair.icon) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">' : "") +
           '<div class="tok-name">' +
-            '<div class="sym">' + esc(t.pair.symbol) + ' <span class="chain-chip">' + esc(t.chain) + '</span>' + (t.pumpfun ? ' <span class="chain-chip pump-chip">pump.fun</span>' : "") + (t.boosted ? ' <span title="Boosted on DexScreener">⚡</span>' : "") + '</div>' +
+            '<div class="sym">' + esc(t.pair.symbol) + ' <span class="chain-chip">' + esc(t.chain) + '</span>' + (t.pumpfun ? ' <span class="chain-chip pump-chip">pump.fun</span>' : "") + (t.fourmeme ? ' <span class="chain-chip pump-chip">four.meme</span>' : "") + (t.boosted ? ' <span title="Boosted on DexScreener">⚡</span>' : "") + '</div>' +
             '<div class="nm">' + esc(t.pair.name) + '</div>' +
           '</div>' +
         '</div>' +
@@ -1460,17 +1505,28 @@ async function runScan() {
       usedFallback = true;
     }
     if ($("pumpFeed").checked && !usedFallback) {
-      setStatus("Fetched " + tokens.length + " tokens. Adding pump.fun bonding-curve feed…", "", true);
+      setStatus("Fetched " + tokens.length + " tokens. Adding launchpad feeds (pump.fun + four.meme)…", "", true);
+      const known = new Map(tokens.map((t) => [tokenKey(t.chain, t.mint), t]));
       try {
         const pump = await discoverPumpFun();
-        const known = new Map(tokens.map((t) => [tokenKey(t.chain, t.mint), t]));
         for (const p of pump) {
           const existing = known.get(tokenKey(p.chain, p.mint));
-          if (existing) { existing.pumpfun = true; existing.geckoPair = p.geckoPair; }
-          else tokens.push(p);
+          if (existing) { existing.pumpfun = true; existing.geckoPair = p.geckoPair; existing.curveAddress = p.curveAddress; }
+          else { known.set(tokenKey(p.chain, p.mint), p); tokens.push(p); }
         }
       } catch (e) {
         setStatus(describeError(e, "loading pump.fun feed") + " Continuing without it…", "warn", true);
+        await sleep(800);
+      }
+      try {
+        const bsc = await discoverBscLaunches();
+        for (const p of bsc) {
+          const existing = known.get(tokenKey(p.chain, p.mint));
+          if (existing) { existing.fourmeme = existing.fourmeme || p.fourmeme; existing.geckoPair = existing.geckoPair || p.geckoPair; }
+          else { known.set(tokenKey(p.chain, p.mint), p); tokens.push(p); }
+        }
+      } catch (e) {
+        setStatus(describeError(e, "loading four.meme feed") + " Continuing without it…", "warn", true);
         await sleep(800);
       }
     }
@@ -1541,7 +1597,7 @@ async function runScan() {
       // Bonding-curve coins live at a different scale (curve holds $1K-$6K,
       // FDV < ~$70K until graduation) — min liquidity/mcap floors would
       // structurally exclude all of them, so only volume/age/max-mcap apply.
-      const bonding = t.pumpfun && (t.curve ? !t.curve.complete : t.pair.liquidity < 10000);
+      const bonding = (t.pumpfun || t.fourmeme) && (t.curve ? !t.curve.complete : t.pair.liquidity < 10000);
       if (bonding) return t.pair.volume24 >= minVol && ageH <= maxAgeH && mcap <= maxMcap;
       return t.pair.liquidity >= minLiq && t.pair.volume24 >= minVol && ageH <= maxAgeH &&
         mcap >= minMcap && mcap <= maxMcap;
