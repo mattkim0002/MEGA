@@ -288,6 +288,23 @@
 
   .section-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 16px 0 8px; }
   .empty-strict { padding: 16px; color: var(--ink-2); font-size: 0.85rem; line-height: 1.5; }
+  .radar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .radar-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .radar-chip {
+    font-size: 0.76rem;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px 10px;
+  }
+  .radar-chip b { color: var(--ink); }
   footer { color: var(--muted); font-size: 0.7rem; margin-top: 24px; text-align: center; }
   footer a { color: var(--muted); }
 
@@ -342,6 +359,7 @@
       <option value="heat">Heat (momentum)</option>
       <option value="trend">Trend (engagement)</option>
       <option value="lore">Lore (story depth)</option>
+      <option value="gap">Gap (attention vs priced-in)</option>
       <option value="volume">24h volume</option>
       <option value="newest">Newest</option>
     </select>
@@ -359,6 +377,7 @@
 </div>
 
 <div id="status">Ready. Press Scan to fetch the latest launches.</div>
+<div id="metaRadar"></div>
 
 <div id="singleResult"></div>
 <div id="results"></div>
@@ -831,6 +850,63 @@ function loreAssess(t) {
   return { score: Math.round(score), pts };
 }
 
+// Narrative radar: discover the scan's live metas from the data itself —
+// terms shared by 3+ coins' symbols/names/stories, ranked by combined volume.
+// Self-updating as metas rotate; no hardcoded narrative list to go stale.
+const NARRATIVE_STOPWORDS = new Set(("the and for with this that from your you are was were have has will all not but its can our out now new just more than into only one who what when where why how made make get got token coin meme memecoin crypto chain sol solana bsc eth base pump fun launch official community world most every people time like dont don yes his her they them lol very first best good big about were street usdt usdc busd dai wsol wbnb weth wrapped").split(" "));
+
+function detectNarratives(tokens) {
+  const termMap = new Map();
+  tokens.forEach((t, i) => {
+    const text = ((t.pair.symbol || "") + " " + (t.pair.name || "") + " " +
+      ((t.profile && t.profile.description) || "")).toLowerCase();
+    const words = new Set(text.split(/[^a-z0-9]+/).filter((w) =>
+      w.length >= 3 && !NARRATIVE_STOPWORDS.has(w) && !/^\d+$/.test(w)));
+    for (const w of words) {
+      if (!termMap.has(w)) termMap.set(w, new Set());
+      termMap.get(w).add(i);
+    }
+  });
+  const clusters = [...termMap.entries()]
+    .filter(([, s]) => s.size >= 3)
+    .map(([term, s]) => ({
+      term, count: s.size,
+      vol: [...s].reduce((sum, i) => sum + (tokens[i].pair.volume24 || 0), 0),
+      members: s,
+    }))
+    .sort((a, b) => b.vol - a.vol)
+    .slice(0, 6);
+  tokens.forEach((t, i) => {
+    for (const c of clusters) if (c.members.has(i)) { t.narrative = c.term; break; }
+  });
+  return clusters;
+}
+
+function renderMetaRadar(clusters) {
+  const el = $("metaRadar");
+  if (!clusters.length) { el.innerHTML = ""; return; }
+  el.innerHTML = '<div class="radar"><span class="radar-label">Narratives in this scan:</span>' +
+    clusters.map((c) =>
+      '<span class="radar-chip" title="' + c.count + ' coins share this term — combined 24h volume ' + fmtUsd(c.vol) + '">' +
+      (c.count >= 5 ? "🔥 " : "") + esc(c.term) + ' <b>×' + c.count + '</b></span>').join("") +
+    '</div>';
+}
+
+// Gap score: the trader's "narrative strength vs how much is priced in".
+// attention (trend+lore) minus priced-in (mcap tier + how far price already
+// ran). Positive = attention exceeds pricing; negative = move already priced.
+// A reading of the present — not a prediction that the gap closes upward.
+function gapScore(t) {
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  const cap = t.pair.marketCap != null ? t.pair.marketCap : (t.pair.fdv || 0);
+  if (!(cap > 0)) return null;
+  const attention = 0.6 * ((t.trend && t.trend.score) || 0) + 0.4 * ((t.lore && t.lore.score) || 0);
+  const capFrac = clamp01(Math.log10(Math.max(cap, 1e4) / 1e5) / 2);       // $100K→0, $10M→1
+  const ranFrac = clamp01(Math.max(t.pair.change24h || 0, 0) / 300);       // +300% 24h→fully run
+  const pricedIn = 100 * (0.5 * capFrac + 0.5 * ranFrac);
+  return Math.round(attention - pricedIn);
+}
+
 // Composite grade A-F: relative signal quality within this scan, weighted
 // toward risk evidence (security, holder research, exit depth) over activity.
 // Hard gates: FAIL verdict = F always; unknown verdict, thin exit depth, or
@@ -1249,6 +1325,9 @@ function tokenCard(t) {
           (t.holders != null ? '<span>Holders <b>' + t.holders.toLocaleString() + '</b></span>' : "") +
           (t.research ? '<span>Research <b>' + t.research.filter((p) => p.ok).length + "/" + t.research.length + '</b></span>' : "") +
           (t.curve ? '<span>Curve <b>' + (t.curve.complete ? "grad" : t.curve.progress.toFixed(0) + "%") + '</b></span>' : "") +
+          (() => { const g = gapScore(t); return g == null ? "" :
+            '<span title="Attention (trend+lore) minus priced-in (mcap tier + 24h run). Positive = attention not yet priced in. A present-tense reading, not a prediction.">Gap <b>' + (g > 0 ? "+" : "") + g + '</b></span>'; })() +
+          (t.narrative ? '<span>Meta <b>' + esc(t.narrative) + '</b></span>' : "") +
           (() => { const p = PHASE_BADGE[(t.runway || (t.runway = runwayAssess(t.pair))).phase];
                    return '<span class="phase ' + p.cls + '">' + p.text + '</span>'; })() +
           (isSetup(t) ? '<span class="phase ph-setup" title="PASS + EARLY + trend ≥ 60 + micro-cap: the pre-run profile. Not a prediction.">⭐ SETUP</span>' : "") +
@@ -1434,6 +1513,7 @@ async function runScan() {
       for (const t of withPairs) if (!t.profile && t.pair.infoProfile) t.profile = t.pair.infoProfile;
     }
     setFunnel(tokens.length, withPairs.length, null, null);
+    renderMetaRadar(detectNarratives(withPairs));
 
     // On-chain curve validation for pump.fun tokens (one batched RPC call)
     const curveToks = withPairs.filter((t) => t.pumpfun && t.curveAddress);
@@ -1477,6 +1557,7 @@ async function runScan() {
     // grade sort starts as a trend sort — grades need the security/research
     // results, so the list re-ranks itself once all checks are done
     else if (sortBy === "lore") filtered.sort((a, b) => (b.lore.score || 0) - (a.lore.score || 0));
+    else if (sortBy === "gap") filtered.sort((a, b) => (gapScore(b) ?? -999) - (gapScore(a) ?? -999));
     else if (sortBy === "newest") filtered.sort((a, b) => (b.pair.createdAt || 0) - (a.pair.createdAt || 0));
     else filtered.sort((a, b) => b.pair.volume24 - a.pair.volume24);
     let truncated = 0;
