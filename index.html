@@ -1741,7 +1741,7 @@ async function checkSingle() {
   }
 }
 
-$("scanBtn").addEventListener("click", () => { saveSettings(); runScan(); });
+$("scanBtn").addEventListener("click", () => { fillBlanks(); saveSettings(); runScan(); });
 /* ---------- sticky settings: filters persist, presets remember your edits ---------- */
 
 const SETTINGS_KEY = "launch-screener-settings-v1";
@@ -1749,10 +1749,21 @@ const FIELD_IDS = ["minLiq", "minVol", "maxAge", "minMcap", "maxMcap", "sortBy"]
 const CHECK_IDS = ["pumpFeed", "strictMode"];
 // Templates apply only the FIRST time a mode is used — after that, each mode
 // remembers whatever you last set while in it and never reverts your values.
+// A field left BLANK snaps back to its mode's template value at scan time
+// (scan mode's blank max-mcap means "no limit" and stays blank by design).
 const MODE_TEMPLATES = {
+  scan:     { minLiq: 10000, minVol: 10000, maxAge: 72,  minMcap: 0,      maxMcap: "",      sortBy: "grade" },
   early:    { minLiq: 5000,  minVol: 5000,  maxAge: 24,  minMcap: 20000,  maxMcap: 1000000, sortBy: "grade" },
   recovery: { minLiq: 10000, minVol: 10000, maxAge: 168, minMcap: 300000, maxMcap: 1000000, sortBy: "grade" },
 };
+
+function fillBlanks() {
+  const tpl = MODE_TEMPLATES[currentMode] || MODE_TEMPLATES.scan;
+  for (const id of FIELD_IDS) {
+    const el = $(id);
+    if (String(el.value).trim() === "" && tpl[id] !== "" && tpl[id] != null) el.value = tpl[id];
+  }
+}
 let currentMode = "scan";
 
 function loadSettings() {
@@ -1774,6 +1785,7 @@ function enterMode(mode) {
   currentMode = mode;
   const s = loadSettings();
   applyValues((s.modes && s.modes[mode]) || MODE_TEMPLATES[mode]);
+  fillBlanks();
   saveSettings();
 }
 // restore last session's values on load
@@ -1783,7 +1795,7 @@ function enterMode(mode) {
   if (s.modes && s.modes[currentMode]) applyValues(s.modes[currentMode]);
   if (s.checks) for (const id of CHECK_IDS) if (s.checks[id] != null) $(id).checked = s.checks[id];
 })();
-for (const id of FIELD_IDS.concat(CHECK_IDS)) $(id).addEventListener("change", saveSettings);
+for (const id of FIELD_IDS.concat(CHECK_IDS)) $(id).addEventListener("change", () => { fillBlanks(); saveSettings(); });
 
 $("recoveryBtn").addEventListener("click", () => { enterMode("recovery"); runScan(); });
 $("huntBtn").addEventListener("click", () => { enterMode("early"); runScan(); });
