@@ -502,6 +502,13 @@ const CHAIN_INFO = {
 
 const tokenKey = (chain, addr) => chain + ":" + addr.toLowerCase();
 
+// Bubblemaps chain codes for wallet-cluster maps (their score API went
+// private; availability + deep links remain publicly usable)
+const BUBBLEMAPS_CHAINS = {
+  solana: "sol", ethereum: "eth", bsc: "bsc", base: "base", arbitrum: "arbi",
+  polygon: "poly", avalanche: "avax", fantom: "ftm", cronos: "cro",
+};
+
 // GeckoTerminal throttles bursts hard — retry once after a backoff on 429
 async function fetchJsonPaced(url, source) {
   try {
@@ -1287,6 +1294,21 @@ async function researchToken(t) {
     } else {
       t.researchError = "No research source available for this chain.";
     }
+    // Bubblemaps wallet-cluster map: flag when one exists (new coins often
+    // aren't computed yet — absence is not a red flag, so no ✕ row for it)
+    const bm = BUBBLEMAPS_CHAINS[t.chain];
+    if (bm && t.research) {
+      try {
+        const av = await fetchJson(
+          "https://api-legacy.bubblemaps.io/map-availability?chain=" + bm + "&token=" + t.mint,
+          "Bubblemaps"
+        );
+        if (av && av.availability) {
+          t.research.push({ ok: true, text: "Bubblemaps wallet-cluster map exists — eyeball connected-wallet bubbles via the link below" });
+          t.hasBubblemap = true;
+        }
+      } catch (e) { /* availability check is best-effort */ }
+    }
   } catch (e) {
     t.researchError = describeError(e, "researching " + t.pair.symbol);
   }
@@ -1452,6 +1474,8 @@ function cardBody(t) {
     if (ci && ci.gmgn) links.push(["GMGN", "https://gmgn.ai/" + ci.gmgn + "/token/" + t.mint]);
     if (ci && ci.explorer) links.push(["Explorer", ci.explorer + t.mint]);
   }
+  const bmCode = BUBBLEMAPS_CHAINS[t.chain];
+  if (bmCode) links.push(["Bubblemaps", "https://app.bubblemaps.io/" + bmCode + "/token/" + t.mint]);
   links.push(["DexScreener", t.pair.url]);
   return rwHtml + riskHtml +
     '<div class="mint-line">Address (' + esc(t.chain) + '): ' + esc(t.mint) + '</div>' +
