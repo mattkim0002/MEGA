@@ -112,6 +112,8 @@
   .ph-quiet { color: var(--muted); border-color: var(--border); }
   .ph-setup { color: var(--warn); border-color: var(--warn); background: rgba(250, 178, 25, 0.08); }
   .ph-rebound { color: var(--accent); border-color: var(--accent); background: rgba(122, 162, 247, 0.08); }
+  .ph-primary { color: var(--good); border-color: var(--good); }
+  .ph-dupe { color: var(--crit); border-color: var(--crit); background: rgba(208, 59, 59, 0.08); }
   .rw { border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 8px; }
   .rw-head { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px; }
   .rw-note { color: var(--ink-2); font-size: 0.78rem; margin-top: 4px; font-style: italic; }
@@ -839,6 +841,30 @@ function heatScore(pair, boosted) {
   return Math.round(score);
 }
 
+// Duplicate-CA detection: same-ticker coins in one scan are usually one real
+// launch plus copycat squats. The market-dominant CA (deepest liquidity) is
+// marked PRIMARY; the rest are flagged DUPE and grade-capped. "Primary" means
+// "winning the name in this scan", not proof of authenticity.
+function detectDupes(tokens) {
+  const bySym = new Map();
+  for (const t of tokens) {
+    t.dupeOf = null; t.dupeCount = 0;
+    const key = (t.pair.symbol || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (key.length < 2) continue;
+    if (!bySym.has(key)) bySym.set(key, []);
+    bySym.get(key).push(t);
+  }
+  for (const group of bySym.values()) {
+    if (group.length < 2) continue;
+    let primary = group[0];
+    for (const t of group) if ((t.pair.liquidity || 0) > (primary.pair.liquidity || 0)) primary = t;
+    for (const t of group) {
+      if (t === primary) t.dupeCount = group.length - 1;
+      else t.dupeOf = primary.pair.symbol;
+    }
+  }
+}
+
 // Trend / engagement score (0-100): how much crowd is on this coin right now.
 // Measures participation (trades, breadth, acceleration, socials, boost spend),
 // not price. Components with no data are skipped and the score renormalized.
@@ -1022,9 +1048,10 @@ function gradeAssess(t) {
   score += isEarlyStage
     ? 8 * loreFrac + 8 * volFrac + 4 * trendFrac
     : 10 * trendFrac + 8 * volFrac + 2 * loreFrac;
-  // caps: unverified or hard-to-exit coins can't grade above C
+  // caps: unverified, hard-to-exit, or copycat coins can't grade above C
   let capTier = 100;
   if (t.verdict === "unknown") capTier = 59;
+  if (t.dupeOf) capTier = Math.min(capTier, 59);
   if (!curveValidated) capTier = Math.min(capTier, 59);
   if (liq < 1000 || (cap > 0 && liq / cap < 0.02)) capTier = Math.min(capTier, 59);
   score = Math.min(Math.round(score), capTier);
@@ -1426,6 +1453,8 @@ function tokenCard(t) {
                    return '<span class="phase ' + p.cls + '">' + p.text + '</span>'; })() +
           (isSetup(t) ? '<span class="phase ph-setup" title="PASS + EARLY + trend ≥ 60 + micro-cap: the pre-run profile. Not a prediction.">⭐ SETUP</span>' : "") +
           (isRebound(t) ? '<span class="phase ph-rebound" title="Sold off 20%+ over 24h, turning up in the last hour with buyers back, narrative present. A shape, not a probability — most dipped coins keep falling.">↩ REBOUND SHAPE</span>' : "") +
+          (t.dupeCount ? '<span class="phase ph-primary" title="' + t.dupeCount + ' other coin(s) in this scan share this ticker; this CA holds the deepest liquidity — chosen by market depth, not proof of authenticity. Verify via the 𝕏 search link.">① PRIMARY · ' + t.dupeCount + ' dupes</span>' : "") +
+          (t.dupeOf ? '<span class="phase ph-dupe" title="Another CA in this scan (' + esc(t.dupeOf) + ') holds far deeper liquidity for this ticker — this is likely a copycat squat. Grade capped at C.">⚠ DUPE</span>' : "") +
         '</div>' +
       '</div>' +
       '<div class="card-body">' + cardBody(t) + '</div>' +
@@ -1503,6 +1532,7 @@ function cardBody(t) {
   }
   const bmCode = BUBBLEMAPS_CHAINS[t.chain];
   if (bmCode) links.push(["Bubblemaps", "https://app.bubblemaps.io/" + bmCode + "/token/" + t.mint]);
+  links.push(["𝕏 CA search", "https://x.com/search?q=" + encodeURIComponent(t.mint) + "&f=live"]);
   links.push(["DexScreener", t.pair.url]);
   return rwHtml + riskHtml +
     '<div class="mint-line">Address (' + esc(t.chain) + '): ' + esc(t.mint) + '</div>' +
@@ -1639,6 +1669,7 @@ async function runScan() {
     }
     setFunnel(tokens.length, withPairs.length, null, null);
     renderMetaRadar(detectNarratives(withPairs));
+    detectDupes(withPairs);
 
     // On-chain curve validation for pump.fun tokens (one batched RPC call)
     const curveToks = withPairs.filter((t) => t.pumpfun && t.curveAddress);
