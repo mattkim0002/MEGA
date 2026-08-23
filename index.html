@@ -367,6 +367,7 @@
   <button id="scanBtn">Scan</button>
   <button class="secondary" id="huntBtn" title="Early-launch mode: fills sensible defaults the first time (micro-cap, under 24h), then remembers whatever filters you set while in this mode — your edits never revert. No preset predicts winners.">🎯 Early hunt</button>
   <button class="secondary" id="recoveryBtn" title="Recovery mode: fills sensible defaults the first time ($300K-$1M, up to 7 days, established coins included), then remembers whatever filters you set while in this mode — your edits never revert. Rebound-shape coins get a badge; the shape is not a probability.">🔄 Recovery</button>
+  <button class="secondary" id="freshBtn" title="Fresh mode: pools minutes-to-an-hour old from the new-pools feeds, mcap-capped at $500K so anything that already ran is excluded, sorted newest first. Maximum rug density, minimum data — verdicts are often UNKNOWN this early, and strict mode will hide most results. That is the protection working, not failing.">🆕 Fresh</button>
   <label class="chk" title="Include launchpad bonding-curve tokens: pump.fun (Solana) and four.meme (BSC), plus the freshest BSC pools. Curve coins are judged at curve scale: min liquidity/mcap floors don't apply to them, since curves hold only $1K-$6K by design."><input type="checkbox" id="pumpFeed" checked> Launchpads (pump.fun + four.meme)</label>
   <label class="chk" title="After all checks finish, only keep coins graded A or B: PASS verdict, strong holder/LP research, real exit depth, validated traction. Most scans will show few or none — an empty list means nothing met the evidence bar, which is the protection working."><input type="checkbox" id="strictMode" checked> Strict mode</label>
 </div>
@@ -656,6 +657,32 @@ async function discoverEstablished() {
       const t = geckoPoolToToken(pool, s.net, s.chain);
       if (!t || seen.has(t.chain + ":" + t.mint)) continue;
       seen.add(t.chain + ":" + t.mint);
+      tokens.push(t);
+    }
+  }
+  return tokens;
+}
+
+// Minutes-old Solana pools (the "newest pairs" view): GeckoTerminal new_pools,
+// with pump.fun-dex entries flagged so they get curve validation + exemptions.
+async function discoverFreshPools() {
+  const tokens = [];
+  const seen = new Set();
+  for (let page = 1; page <= 2; page++) {
+    if (page > 1) await sleep(600);
+    let data;
+    try {
+      data = await fetchJsonPaced(
+        "https://api.geckoterminal.com/api/v2/networks/solana/new_pools?page=" + page,
+        "GeckoTerminal (new pools)"
+      );
+    } catch (e) { continue; }
+    for (const pool of (data && data.data) || []) {
+      const t = geckoPoolToToken(pool, "solana", "solana");
+      if (!t || seen.has(t.mint)) continue;
+      seen.add(t.mint);
+      const dex = pool.relationships && pool.relationships.dex && pool.relationships.dex.data;
+      if (dex && dex.id === "pump-fun") { t.pumpfun = true; t.curveAddress = t.poolAddress; }
       tokens.push(t);
     }
   }
@@ -1554,6 +1581,24 @@ async function runScan() {
         await sleep(800);
       }
     }
+    // Fresh-style scans (max age <= 2h) pull the minutes-old new-pools feed —
+    // the latest-profiles feeds lag by hours, so a tight age window would
+    // otherwise return almost nothing
+    if (!usedFallback && (parseFloat($("maxAge").value) || Infinity) <= 2) {
+      setStatus("Adding minutes-old pools (GeckoTerminal new pools)…", "", true);
+      try {
+        const fresh = await discoverFreshPools();
+        const known = new Set(tokens.map((t) => tokenKey(t.chain, t.mint)));
+        for (const f of fresh) {
+          if (known.has(tokenKey(f.chain, f.mint))) continue;
+          known.add(tokenKey(f.chain, f.mint));
+          tokens.push(f);
+        }
+      } catch (e) {
+        setStatus(describeError(e, "loading new pools") + " Continuing without them…", "warn", true);
+        await sleep(800);
+      }
+    }
     // Recovery-style scans (max age > 48h) also pull established coins —
     // the latest feeds only contain fresh launches, so without this pool an
     // older-age window would return the same coins as an early hunt
@@ -1835,6 +1880,7 @@ const MODE_TEMPLATES = {
   scan:     { minLiq: 10000, minVol: 10000, maxAge: 72,  minMcap: 0,      maxMcap: "",      sortBy: "grade" },
   early:    { minLiq: 5000,  minVol: 5000,  maxAge: 24,  minMcap: 20000,  maxMcap: 1000000, sortBy: "grade" },
   recovery: { minLiq: 10000, minVol: 10000, maxAge: 168, minMcap: 300000, maxMcap: 1000000, sortBy: "grade" },
+  fresh:    { minLiq: 1000,  minVol: 1000,  maxAge: 1,   minMcap: 0,      maxMcap: 500000,  sortBy: "newest" },
 };
 
 function fillBlanks() {
@@ -1879,6 +1925,7 @@ for (const id of FIELD_IDS.concat(CHECK_IDS)) $(id).addEventListener("change", (
 
 $("recoveryBtn").addEventListener("click", () => { enterMode("recovery"); runScan(); });
 $("huntBtn").addEventListener("click", () => { enterMode("early"); runScan(); });
+$("freshBtn").addEventListener("click", () => { enterMode("fresh"); runScan(); });
 $("checkBtn").addEventListener("click", checkSingle);
 $("mintInput").addEventListener("keydown", (e) => { if (e.key === "Enter") checkSingle(); });
 </script>
