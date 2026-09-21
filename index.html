@@ -403,7 +403,7 @@ const statusEl = $("status");
 const resultsEl = $("results");
 const singleEl = $("singleResult");
 const RUGCHECK_DELAY_MS = 900;
-const MAX_RUGCHECKS = 25;
+const MAX_RUGCHECKS = 30;
 
 let scanning = false;
 
@@ -667,10 +667,10 @@ async function discoverEstablished() {
 
 // Minutes-old Solana pools (the "newest pairs" view): GeckoTerminal new_pools,
 // with pump.fun-dex entries flagged so they get curve validation + exemptions.
-async function discoverFreshPools() {
+async function discoverFreshPools(pages) {
   const tokens = [];
   const seen = new Set();
-  for (let page = 1; page <= 2; page++) {
+  for (let page = 1; page <= (pages || 2); page++) {
     if (page > 1) await sleep(600);
     let data;
     try {
@@ -685,6 +685,33 @@ async function discoverFreshPools() {
       seen.add(t.mint);
       const dex = pool.relationships && pool.relationships.dex && pool.relationships.dex.data;
       if (dex && dex.id === "pump-fun") { t.pumpfun = true; t.curveAddress = t.poolAddress; }
+      tokens.push(t);
+    }
+  }
+  return tokens;
+}
+
+// High-traction pools: ranked by 24h TRANSACTION COUNT, not volume — trade
+// count measures crowd size and is much harder for one whale to fake. This is
+// the "gaining traction" middle that latest-feeds (too new) and trending
+// (already won) both miss.
+async function discoverTraction() {
+  const tokens = [];
+  const seen = new Set();
+  const sources = [
+    { url: "https://api.geckoterminal.com/api/v2/networks/solana/pools?page=1&sort=h24_tx_count_desc", net: "solana", chain: "solana" },
+    { url: "https://api.geckoterminal.com/api/v2/networks/bsc/pools?page=1&sort=h24_tx_count_desc", net: "bsc", chain: "bsc" },
+  ];
+  for (let i = 0; i < sources.length; i++) {
+    if (i) await sleep(600);
+    const s = sources[i];
+    let data;
+    try { data = await fetchJsonPaced(s.url, "GeckoTerminal (traction)"); }
+    catch (e) { continue; }
+    for (const pool of (data && data.data) || []) {
+      const t = geckoPoolToToken(pool, s.net, s.chain);
+      if (!t || seen.has(t.chain + ":" + t.mint)) continue;
+      seen.add(t.chain + ":" + t.mint);
       tokens.push(t);
     }
   }
@@ -1611,23 +1638,25 @@ async function runScan() {
         await sleep(800);
       }
     }
-    // Fresh-style scans (max age <= 2h) pull the minutes-old new-pools feed —
-    // the latest-profiles feeds lag by hours, so a tight age window would
-    // otherwise return almost nothing
-    if (!usedFallback && (parseFloat($("maxAge").value) || Infinity) <= 2) {
-      setStatus("Adding minutes-old pools (GeckoTerminal new pools)…", "", true);
-      try {
-        const fresh = await discoverFreshPools();
-        const known = new Set(tokens.map((t) => tokenKey(t.chain, t.mint)));
-        for (const f of fresh) {
-          if (known.has(tokenKey(f.chain, f.mint))) continue;
-          known.add(tokenKey(f.chain, f.mint));
+    // Scans focused on young coins (max age <= 48h) pull the deeper feeds:
+    // several pages of minutes-old pools plus the transaction-count leaders —
+    // the "crowd arriving but still early" slice that latest-feeds (too new)
+    // and trending (already won) both miss
+    if (!usedFallback && (parseFloat($("maxAge").value) || Infinity) <= 48) {
+      setStatus("Adding fresh + high-traction pools…", "", true);
+      const known = new Set(tokens.map((t) => tokenKey(t.chain, t.mint)));
+      const merge = (list) => {
+        for (const f of list) {
+          const k = tokenKey(f.chain, f.mint);
+          if (known.has(k)) continue;
+          known.add(k);
           tokens.push(f);
         }
-      } catch (e) {
-        setStatus(describeError(e, "loading new pools") + " Continuing without them…", "warn", true);
-        await sleep(800);
-      }
+      };
+      try { merge(await discoverFreshPools(3)); }
+      catch (e) { setStatus(describeError(e, "loading new pools") + " Continuing…", "warn", true); await sleep(800); }
+      try { merge(await discoverTraction()); }
+      catch (e) { setStatus(describeError(e, "loading traction pools") + " Continuing…", "warn", true); await sleep(800); }
     }
     // Recovery-style scans (max age > 48h) also pull established coins —
     // the latest feeds only contain fresh launches, so without this pool an
