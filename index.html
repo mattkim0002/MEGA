@@ -1,0 +1,2046 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memecoin Launch Screener</title>
+<style>
+  :root {
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #232322;
+    --border: #33332f;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --good: #0ca30c;
+    --warn: #fab219;
+    --crit: #d03b3b;
+    --accent: #7aa2f7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.45;
+    padding: 16px;
+    max-width: 980px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.25rem; font-weight: 700; }
+  h1 .sub { display: block; font-size: 0.8rem; font-weight: 400; color: var(--muted); margin-top: 2px; }
+  header { margin-bottom: 14px; }
+
+  /* Funnel stat tiles */
+  .funnel {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    position: relative;
+  }
+  .tile .label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .tile .value { font-size: 1.45rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink); }
+  .tile:not(:first-child)::before {
+    content: "\2192";
+    position: absolute;
+    left: -9px; top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+    font-size: 0.7rem;
+  }
+
+  /* Controls */
+  .controls {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: flex-end;
+  }
+  .field { display: flex; flex-direction: column; gap: 3px; flex: 1 1 120px; min-width: 110px; }
+  .field label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .metrics .up { color: var(--good); }
+  .metrics .down { color: var(--crit); }
+  .chk {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    color: var(--ink-2);
+    cursor: pointer;
+    padding: 9px 0;
+    flex: 0 0 auto;
+  }
+  .chk input { accent-color: var(--accent); }
+  .pump-chip { color: var(--good); border-color: var(--good); }
+  .chain-chip {
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: var(--ink-2);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    vertical-align: middle;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .phase {
+    font-size: 0.66rem;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid;
+    letter-spacing: 0.04em;
+    align-self: center;
+  }
+  .ph-early { color: var(--good); border-color: var(--good); }
+  .ph-running { color: var(--warn); border-color: var(--warn); }
+  .ph-extended { color: var(--crit); border-color: var(--crit); }
+  .ph-quiet { color: var(--muted); border-color: var(--border); }
+  .ph-setup { color: var(--warn); border-color: var(--warn); background: rgba(250, 178, 25, 0.08); }
+  .ph-rebound { color: var(--accent); border-color: var(--accent); background: rgba(122, 162, 247, 0.08); }
+  .ph-primary { color: var(--good); border-color: var(--good); }
+  .ph-dupe { color: var(--crit); border-color: var(--crit); background: rgba(208, 59, 59, 0.08); }
+  .rw { border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 8px; }
+  .rw-head { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px; }
+  .rw-note { color: var(--ink-2); font-size: 0.78rem; margin-top: 4px; font-style: italic; }
+  .lore-text {
+    color: var(--ink-2);
+    font-size: 0.78rem;
+    font-style: italic;
+    border-left: 2px solid var(--border);
+    padding: 4px 0 4px 10px;
+    margin-top: 6px;
+    white-space: pre-line;
+  }
+  .risk .lvl.rw-ok { color: var(--good); }
+  .risk .lvl.rw-no { color: var(--crit); }
+  select {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--ink);
+    padding: 8px 10px;
+    font-size: 0.9rem;
+    width: 100%;
+  }
+  input[type="number"], input[type="text"] {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--ink);
+    padding: 8px 10px;
+    font-size: 0.9rem;
+    width: 100%;
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button {
+    background: var(--accent);
+    color: #0d0d0d;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 18px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    flex: 0 0 auto;
+  }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.secondary { background: var(--surface-2); color: var(--ink); border: 1px solid var(--border); }
+
+  /* Single-token check */
+  .single {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .single input { flex: 1 1 260px; }
+
+  /* Status line */
+  #status {
+    font-size: 0.82rem;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-variant-numeric: tabular-nums;
+  }
+  #status.error { color: var(--crit); border-color: var(--crit); }
+  #status.warn { color: var(--warn); }
+  .spinner {
+    width: 12px; height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex: 0 0 auto;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Token cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+  .card-head {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px 10px;
+    padding: 10px 12px;
+    cursor: pointer;
+    align-items: center;
+  }
+  .card-head:hover { background: var(--surface-2); }
+  .tok-id { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .tok-id img { width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2); flex: 0 0 auto; }
+  .tok-name { min-width: 0; }
+  .tok-name .sym { font-weight: 700; font-size: 0.95rem; }
+  .tok-name .nm { color: var(--muted); font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+  .metrics {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    font-size: 0.75rem;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .metrics b { color: var(--ink); font-weight: 600; }
+  .head-badges { display: flex; align-items: center; gap: 6px; }
+  .grade {
+    font-size: 0.8rem;
+    font-weight: 800;
+    width: 22px; height: 22px;
+    border-radius: 6px;
+    border: 1px solid;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+  }
+  .g-A { color: var(--good); border-color: var(--good); }
+  .g-B { color: var(--accent); border-color: var(--accent); }
+  .g-C { color: var(--warn); border-color: var(--warn); }
+  .g-D { color: #ec835a; border-color: #ec835a; }
+  .g-F { color: var(--crit); border-color: var(--crit); background: rgba(208, 59, 59, 0.12); }
+  .verdict {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid;
+    white-space: nowrap;
+    letter-spacing: 0.03em;
+  }
+  .verdict.pass { color: var(--good); border-color: var(--good); }
+  .verdict.caution { color: var(--warn); border-color: var(--warn); }
+  .verdict.fail { color: var(--crit); border-color: var(--crit); }
+  .verdict.pending, .verdict.unknown { color: var(--muted); border-color: var(--border); }
+
+  .card-body {
+    display: none;
+    border-top: 1px solid var(--border);
+    padding: 10px 12px;
+    font-size: 0.82rem;
+  }
+  .card.open .card-body { display: block; }
+  .risk { display: flex; gap: 8px; padding: 4px 0; align-items: baseline; }
+  .risk .lvl { font-weight: 700; font-size: 0.7rem; flex: 0 0 58px; }
+  .risk .lvl.danger { color: var(--crit); }
+  .risk .lvl.warn { color: var(--warn); }
+  .risk .lvl.info { color: var(--muted); }
+  .risk .desc { color: var(--muted); }
+  .risk .rname { color: var(--ink-2); font-weight: 600; }
+  .norisks { color: var(--good); padding: 4px 0; }
+  .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .links a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.78rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    background: var(--surface-2);
+  }
+  .links a:hover { border-color: var(--accent); }
+  .mint-line { color: var(--muted); font-size: 0.72rem; word-break: break-all; margin-top: 8px; }
+
+  .section-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 16px 0 8px; }
+  .empty-strict { padding: 16px; color: var(--ink-2); font-size: 0.85rem; line-height: 1.5; }
+  .radar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .radar-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .radar-chip {
+    font-size: 0.76rem;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px 10px;
+  }
+  .radar-chip b { color: var(--ink); }
+  footer { color: var(--muted); font-size: 0.7rem; margin-top: 24px; text-align: center; }
+  footer a { color: var(--muted); }
+
+  @media (max-width: 560px) {
+    body { padding: 10px; }
+    .funnel { grid-template-columns: repeat(2, 1fr); }
+    .tile:not(:first-child)::before { content: none; }
+    .tile .value { font-size: 1.2rem; }
+    .tok-name .nm { max-width: 140px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Memecoin Launch Screener
+    <span class="sub">DexScreener latest + boosted tokens, all chains &middot; liquidity / volume / age filters &middot; RugCheck (Solana) + GoPlus (EVM) verdicts</span>
+  </h1>
+</header>
+
+<div class="funnel" aria-label="Scan funnel">
+  <div class="tile"><div class="label">Fetched</div><div class="value" id="f-fetched">&ndash;</div></div>
+  <div class="tile"><div class="label">Live pairs</div><div class="value" id="f-live">&ndash;</div></div>
+  <div class="tile"><div class="label">Met filters</div><div class="value" id="f-filtered">&ndash;</div></div>
+  <div class="tile"><div class="label">Passed</div><div class="value" id="f-passed">&ndash;</div></div>
+</div>
+
+<div class="controls">
+  <div class="field">
+    <label for="minLiq">Min liquidity ($)</label>
+    <input type="number" id="minLiq" value="10000" min="0" step="1000">
+  </div>
+  <div class="field">
+    <label for="minVol">Min 24h volume ($)</label>
+    <input type="number" id="minVol" value="10000" min="0" step="1000">
+  </div>
+  <div class="field">
+    <label for="maxAge">Max age (hours)</label>
+    <input type="number" id="maxAge" value="72" min="1" step="1">
+  </div>
+  <div class="field">
+    <label for="minMcap">Min mcap ($)</label>
+    <input type="number" id="minMcap" value="0" min="0" step="10000">
+  </div>
+  <div class="field">
+    <label for="maxMcap">Max mcap ($)</label>
+    <input type="number" id="maxMcap" placeholder="no limit" min="0" step="10000">
+  </div>
+  <div class="field">
+    <label for="sortBy">Sort by</label>
+    <select id="sortBy">
+      <option value="grade" selected>Grade (signal quality)</option>
+      <option value="heat">Heat (momentum)</option>
+      <option value="trend">Trend (engagement)</option>
+      <option value="lore">Lore (story depth)</option>
+      <option value="gap">Gap (attention vs priced-in)</option>
+      <option value="volume">24h volume</option>
+      <option value="newest">Newest</option>
+    </select>
+  </div>
+  <div class="field" style="flex: 2 1 220px;">
+    <label for="xProxy" title="Optional: URL of your own Cloudflare Worker proxy for twitterapi.io (see x-proxy-worker.js in the repo). Your API key lives in the worker, never in this page. When set, researched coins get an 𝕏-mentions check.">𝕏 proxy URL (optional)</label>
+    <input type="text" id="xProxy" placeholder="https://x-proxy.you.workers.dev" spellcheck="false">
+  </div>
+  <button id="scanBtn">Scan</button>
+  <button class="secondary" id="huntBtn" title="Early-launch mode: fills sensible defaults the first time (micro-cap, under 24h), then remembers whatever filters you set while in this mode — your edits never revert. No preset predicts winners.">🎯 Early hunt</button>
+  <button class="secondary" id="recoveryBtn" title="Recovery mode: fills sensible defaults the first time ($300K-$1M, up to 7 days, established coins included), then remembers whatever filters you set while in this mode — your edits never revert. Rebound-shape coins get a badge; the shape is not a probability.">🔄 Recovery</button>
+  <button class="secondary" id="freshBtn" title="Fresh mode: pools minutes-to-an-hour old from the new-pools feeds, mcap-capped at $500K so anything that already ran is excluded, sorted newest first. Maximum rug density, minimum data — verdicts are often UNKNOWN this early, and strict mode will hide most results. That is the protection working, not failing.">🆕 Fresh</button>
+  <label class="chk" title="Include launchpad bonding-curve tokens: pump.fun (Solana) and four.meme (BSC), plus the freshest BSC pools. Curve coins are judged at curve scale: min liquidity/mcap floors don't apply to them, since curves hold only $1K-$6K by design."><input type="checkbox" id="pumpFeed" checked> Launchpads (pump.fun + four.meme)</label>
+  <label class="chk" title="After all checks finish, only keep coins graded A or B: PASS verdict, strong holder/LP research, real exit depth, validated traction. Most scans will show few or none — an empty list means nothing met the evidence bar, which is the protection working."><input type="checkbox" id="strictMode" checked> Strict mode</label>
+</div>
+
+<div class="single">
+  <input type="text" id="mintInput" placeholder="Paste a token address (any chain) to check a single token&hellip;" spellcheck="false">
+  <button class="secondary" id="checkBtn">Check</button>
+</div>
+
+<div id="status">Ready. Press Scan to fetch the latest launches.</div>
+<div id="metaRadar"></div>
+
+<div id="singleResult"></div>
+<div id="results"></div>
+
+<footer>
+  Data: <a href="https://docs.dexscreener.com/api/reference" target="_blank" rel="noopener">DexScreener</a> &middot;
+  <a href="https://rugcheck.xyz" target="_blank" rel="noopener">RugCheck</a> (Solana) &middot;
+  <a href="https://gopluslabs.io" target="_blank" rel="noopener">GoPlus</a> (EVM/Tron) &middot;
+  fallback: <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">GeckoTerminal</a> (Solana only).
+  Not financial advice &mdash; a PASS only means no automated flags, Heat measures current
+  activity (not future performance), and grades rank relative signal quality within a scan:
+  an A-grade memecoin is still a lottery ticket, just not a rigged one.
+</footer>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+const resultsEl = $("results");
+const singleEl = $("singleResult");
+const RUGCHECK_DELAY_MS = 900;
+const MAX_RUGCHECKS = 30;
+
+let scanning = false;
+
+/* ---------- fetch layer with error classification ---------- */
+
+class RateLimitError extends Error {
+  constructor(source) { super(source + " returned HTTP 429 (rate limited)"); this.source = source; }
+}
+class HttpError extends Error {
+  constructor(source, code) { super(source + " returned HTTP " + code); this.source = source; this.code = code; }
+}
+class NetworkError extends Error {
+  constructor(source) { super(source + " unreachable (CORS or network failure)"); this.source = source; }
+}
+
+async function fetchJson(url, source) {
+  let res;
+  try {
+    res = await fetch(url, { headers: { "Accept": "application/json" } });
+  } catch (e) {
+    // fetch() rejects with TypeError on CORS blocks and network failures
+    throw new NetworkError(source);
+  }
+  if (res.status === 429) throw new RateLimitError(source);
+  if (!res.ok) throw new HttpError(source, res.status);
+  return res.json();
+}
+
+function describeError(e, context) {
+  if (e instanceof RateLimitError)
+    return "Rate limited (HTTP 429) by " + e.source + (context ? " while " + context : "") + ". Wait a minute and try again — the API throttles per IP.";
+  if (e instanceof NetworkError)
+    return "Could not reach " + e.source + (context ? " while " + context : "") + " — CORS block or network failure. Check your connection / ad-blocker.";
+  if (e instanceof HttpError)
+    return e.source + " error (HTTP " + e.code + ")" + (context ? " while " + context : "") + ".";
+  return "Unexpected error" + (context ? " while " + context : "") + ": " + e.message;
+}
+
+function setStatus(msg, cls, busy) {
+  statusEl.className = cls || "";
+  statusEl.innerHTML = (busy ? '<span class="spinner"></span>' : "") + "<span></span>";
+  statusEl.lastChild.textContent = msg;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* ---------- formatting ---------- */
+
+function fmtUsd(n) {
+  if (n == null || isNaN(n)) return "–";
+  if (n >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
+  if (n >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
+  if (n >= 1e3) return "$" + (n / 1e3).toFixed(1) + "K";
+  return "$" + n.toFixed(0);
+}
+function fmtAge(hours) {
+  if (hours == null || isNaN(hours)) return "–";
+  if (hours < 1) return Math.round(hours * 60) + "m";
+  if (hours < 48) return hours.toFixed(1) + "h";
+  return (hours / 24).toFixed(1) + "d";
+}
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* ---------- data sources ---------- */
+
+// Chain metadata: GoPlus chain id for security checks, explorer + GMGN links.
+// Solana is special-cased (RugCheck); chains absent here get an honest UNKNOWN.
+const CHAIN_INFO = {
+  ethereum:  { gp: "1",      explorer: "https://etherscan.io/token/",            gmgn: "eth" },
+  bsc:       { gp: "56",     explorer: "https://bscscan.com/token/",             gmgn: "bsc" },
+  base:      { gp: "8453",   explorer: "https://basescan.org/token/",            gmgn: "base" },
+  arbitrum:  { gp: "42161",  explorer: "https://arbiscan.io/token/" },
+  polygon:   { gp: "137",    explorer: "https://polygonscan.com/token/" },
+  optimism:  { gp: "10",     explorer: "https://optimistic.etherscan.io/token/" },
+  avalanche: { gp: "43114",  explorer: "https://snowtrace.io/token/" },
+  fantom:    { gp: "250",    explorer: "https://ftmscan.com/token/" },
+  cronos:    { gp: "25",     explorer: "https://cronoscan.com/token/" },
+  zksync:    { gp: "324",    explorer: "https://explorer.zksync.io/address/" },
+  linea:     { gp: "59144",  explorer: "https://lineascan.build/token/" },
+  scroll:    { gp: "534352", explorer: "https://scrollscan.com/token/" },
+  blast:     { gp: "81457",  explorer: "https://blastscan.io/token/" },
+  mantle:    { gp: "5000",   explorer: "https://mantlescan.xyz/token/" },
+  opbnb:     { gp: "204",    explorer: "https://opbnb.bscscan.com/token/" },
+  gnosis:    { gp: "100",    explorer: "https://gnosisscan.io/token/" },
+  pulsechain:{ gp: "369",    explorer: "https://scan.pulsechain.com/token/" },
+  unichain:  { gp: "130",    explorer: "https://uniscan.xyz/token/" },
+  berachain: { gp: "80094",  explorer: "https://berascan.com/token/" },
+  sonic:     { gp: "146",    explorer: "https://sonicscan.org/token/" },
+  abstract:  { gp: "2741",   explorer: "https://abscan.org/token/" },
+  soneium:   { gp: "1868",   explorer: "https://soneium.blockscout.com/token/" },
+  worldchain:{ gp: "480",    explorer: "https://worldscan.org/token/" },
+  hyperevm:  { gp: "999",    explorer: "https://hyperevmscan.io/token/" },
+  tron:      { gp: "tron",   explorer: "https://tronscan.org/#/token20/",        gmgn: "tron" },
+  robinhood: { gp: "4663" }, // young chain: GoPlus data is sparse (no honeypot sim / holders yet)
+};
+
+const tokenKey = (chain, addr) => chain + ":" + addr.toLowerCase();
+
+// Bubblemaps chain codes for wallet-cluster maps (their score API went
+// private; availability + deep links remain publicly usable)
+const BUBBLEMAPS_CHAINS = {
+  solana: "sol", ethereum: "eth", bsc: "bsc", base: "base", arbitrum: "arbi",
+  polygon: "poly", avalanche: "avax", fantom: "ftm", cronos: "cro",
+};
+
+// GeckoTerminal throttles bursts hard — retry once after a backoff on 429
+async function fetchJsonPaced(url, source) {
+  try {
+    return await fetchJson(url, source);
+  } catch (e) {
+    if (!(e instanceof RateLimitError)) throw e;
+    await sleep(2500);
+    return fetchJson(url, source);
+  }
+}
+
+// Primary discovery: DexScreener token-profiles + token-boosts (all chains)
+async function discoverTokens() {
+  const [profiles, boosts] = await Promise.all([
+    fetchJson("https://api.dexscreener.com/token-profiles/latest/v1", "DexScreener profiles"),
+    fetchJson("https://api.dexscreener.com/token-boosts/latest/v1", "DexScreener boosts"),
+  ]);
+  const tokens = [];
+  const byKey = new Map();
+  for (const item of [].concat(profiles || [], boosts || [])) {
+    if (!item.chainId || !item.tokenAddress) continue;
+    const key = tokenKey(item.chainId, item.tokenAddress);
+    // Count distinct social/link types on the profile (website, twitter, telegram…)
+    const linkTypes = new Set();
+    for (const l of item.links || []) linkTypes.add((l.type || l.label || "link").toLowerCase());
+    const boostAmount = item.totalAmount || 0;
+    const profile = {
+      description: (item.description || "").trim(),
+      linkTypes,
+      hasHeader: !!item.header,
+      hasIcon: !!item.icon,
+      cto: item.cto === true,
+    };
+    const existing = byKey.get(key);
+    if (existing) {
+      // token can appear in both feeds — merge the engagement/lore data
+      existing.boosted = existing.boosted || item.totalAmount != null;
+      existing.boostAmount = Math.max(existing.boostAmount, boostAmount);
+      existing.socials = Math.max(existing.socials, linkTypes.size);
+      const ep = existing.profile;
+      if (profile.description.length > ep.description.length) ep.description = profile.description;
+      for (const lt of linkTypes) ep.linkTypes.add(lt);
+      ep.hasHeader = ep.hasHeader || profile.hasHeader;
+      ep.hasIcon = ep.hasIcon || profile.hasIcon;
+      ep.cto = ep.cto || profile.cto;
+      continue;
+    }
+    const t = {
+      mint: item.tokenAddress, chain: item.chainId,
+      boosted: item.totalAmount != null, boostAmount, socials: linkTypes.size,
+      profile,
+    };
+    byKey.set(key, t);
+    tokens.push(t);
+  }
+  return tokens;
+}
+
+// Map a GeckoTerminal pool object to a token with a pair built from the pool
+// attributes (stored as geckoPair — used directly in fallback mode, or as a
+// backstop when DexScreener has no pair for the mint yet).
+const WRAPPED_NATIVES = new Set([
+  "So11111111111111111111111111111111111111112",           // WSOL
+  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",            // WBNB
+  "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",            // WETH
+]);
+
+function geckoPoolToToken(pool, geckoNet = "solana", chain = "solana") {
+  const a = pool.attributes || {};
+  const rel = pool.relationships || {};
+  const baseId = rel.base_token && rel.base_token.data && rel.base_token.data.id;
+  if (!baseId || !baseId.startsWith(geckoNet + "_")) return null;
+  const mint = baseId.slice(geckoNet.length + 1);
+  if (WRAPPED_NATIVES.has(mint.toLowerCase()) || WRAPPED_NATIVES.has(mint)) return null;
+  const nameParts = (a.name || "").split(" / ");
+  const pc = a.price_change_percentage || {};
+  const tx = (a.transactions && a.transactions.h24) || {};
+  return {
+    mint,
+    chain,
+    boosted: false,
+    poolAddress: a.address,
+    geckoPair: {
+      chain,
+      symbol: nameParts[0] || mint.slice(0, 6),
+      name: a.name || "",
+      icon: null,
+      liquidity: parseFloat(a.reserve_in_usd),
+      volume24: a.volume_usd ? parseFloat(a.volume_usd.h24) : NaN,
+      marketCap: a.market_cap_usd != null ? parseFloat(a.market_cap_usd) : null,
+      fdv: a.fdv_usd != null ? parseFloat(a.fdv_usd) : null,
+      createdAt: a.pool_created_at ? Date.parse(a.pool_created_at) : null,
+      change1h: pc.h1 != null ? parseFloat(pc.h1) : null,
+      change6h: pc.h6 != null ? parseFloat(pc.h6) : null,
+      change24h: pc.h24 != null ? parseFloat(pc.h24) : null,
+      buys: tx.buys != null ? tx.buys : null,
+      sells: tx.sells != null ? tx.sells : null,
+      buys1h: a.transactions && a.transactions.h1 ? a.transactions.h1.buys : null,
+      sells1h: a.transactions && a.transactions.h1 ? a.transactions.h1.sells : null,
+      url: "https://www.geckoterminal.com/" + geckoNet + "/pools/" + a.address,
+    },
+  };
+}
+
+// Fallback discovery + market data in one: GeckoTerminal new Solana pools
+async function discoverViaFallback() {
+  const tokens = [];
+  const seen = new Set();
+  for (let page = 1; page <= 2; page++) {
+    const data = await fetchJson(
+      "https://api.geckoterminal.com/api/v2/networks/solana/new_pools?page=" + page,
+      "GeckoTerminal (fallback)"
+    );
+    for (const pool of (data && data.data) || []) {
+      const t = geckoPoolToToken(pool);
+      if (!t || seen.has(t.mint)) continue;
+      seen.add(t.mint);
+      t.pair = t.geckoPair;
+      tokens.push(t);
+    }
+  }
+  return tokens;
+}
+
+// Established coins: GeckoTerminal trending + top-volume Solana pools.
+// The latest-profiles/boosts feeds skew to coins hours old, so recovery-style
+// scans (max age > 48h) need this older pool to differ from early hunts.
+async function discoverEstablished() {
+  const tokens = [];
+  const seen = new Set();
+  const sources = [
+    { url: "https://api.geckoterminal.com/api/v2/networks/solana/trending_pools?page=1", net: "solana", chain: "solana" },
+    { url: "https://api.geckoterminal.com/api/v2/networks/solana/trending_pools?page=2", net: "solana", chain: "solana" },
+    { url: "https://api.geckoterminal.com/api/v2/networks/solana/pools?page=1&sort=h24_volume_usd_desc", net: "solana", chain: "solana" },
+    { url: "https://api.geckoterminal.com/api/v2/networks/bsc/trending_pools?page=1", net: "bsc", chain: "bsc" },
+    { url: "https://api.geckoterminal.com/api/v2/networks/bsc/pools?page=1&sort=h24_volume_usd_desc", net: "bsc", chain: "bsc" },
+  ];
+  for (let i = 0; i < sources.length; i++) {
+    if (i) await sleep(600);
+    const s = sources[i];
+    let data;
+    try { data = await fetchJsonPaced(s.url, "GeckoTerminal (trending)"); }
+    catch (e) { continue; } // keep whatever sources succeeded
+    for (const pool of (data && data.data) || []) {
+      const t = geckoPoolToToken(pool, s.net, s.chain);
+      if (!t || seen.has(t.chain + ":" + t.mint)) continue;
+      seen.add(t.chain + ":" + t.mint);
+      tokens.push(t);
+    }
+  }
+  return tokens;
+}
+
+// Minutes-old Solana pools (the "newest pairs" view): GeckoTerminal new_pools,
+// with pump.fun-dex entries flagged so they get curve validation + exemptions.
+async function discoverFreshPools(pages) {
+  const tokens = [];
+  const seen = new Set();
+  for (let page = 1; page <= (pages || 2); page++) {
+    if (page > 1) await sleep(600);
+    let data;
+    try {
+      data = await fetchJsonPaced(
+        "https://api.geckoterminal.com/api/v2/networks/solana/new_pools?page=" + page,
+        "GeckoTerminal (new pools)"
+      );
+    } catch (e) { continue; }
+    for (const pool of (data && data.data) || []) {
+      const t = geckoPoolToToken(pool, "solana", "solana");
+      if (!t || seen.has(t.mint)) continue;
+      seen.add(t.mint);
+      const dex = pool.relationships && pool.relationships.dex && pool.relationships.dex.data;
+      if (dex && dex.id === "pump-fun") { t.pumpfun = true; t.curveAddress = t.poolAddress; }
+      tokens.push(t);
+    }
+  }
+  return tokens;
+}
+
+// High-traction pools: ranked by 24h TRANSACTION COUNT, not volume — trade
+// count measures crowd size and is much harder for one whale to fake. This is
+// the "gaining traction" middle that latest-feeds (too new) and trending
+// (already won) both miss.
+async function discoverTraction() {
+  const tokens = [];
+  const seen = new Set();
+  const sources = [
+    { url: "https://api.geckoterminal.com/api/v2/networks/solana/pools?page=1&sort=h24_tx_count_desc", net: "solana", chain: "solana" },
+    { url: "https://api.geckoterminal.com/api/v2/networks/bsc/pools?page=1&sort=h24_tx_count_desc", net: "bsc", chain: "bsc" },
+  ];
+  for (let i = 0; i < sources.length; i++) {
+    if (i) await sleep(600);
+    const s = sources[i];
+    let data;
+    try { data = await fetchJsonPaced(s.url, "GeckoTerminal (traction)"); }
+    catch (e) { continue; }
+    for (const pool of (data && data.data) || []) {
+      const t = geckoPoolToToken(pool, s.net, s.chain);
+      if (!t || seen.has(t.chain + ":" + t.mint)) continue;
+      seen.add(t.chain + ":" + t.mint);
+      tokens.push(t);
+    }
+  }
+  return tokens;
+}
+
+// BSC launchpad feed: four.meme bonding pools (BSC's pump.fun — currently the
+// larger launchpad) plus the freshest BSC pools of any dex.
+async function discoverBscLaunches() {
+  const tokens = [];
+  const seen = new Set();
+  const urls = [
+    "https://api.geckoterminal.com/api/v2/networks/bsc/dexes/four-meme/pools?page=1",
+    "https://api.geckoterminal.com/api/v2/networks/bsc/dexes/four-meme/pools?page=2",
+    "https://api.geckoterminal.com/api/v2/networks/bsc/new_pools?page=1",
+  ];
+  for (let i = 0; i < urls.length; i++) {
+    if (i) await sleep(600);
+    let data;
+    try { data = await fetchJsonPaced(urls[i], "GeckoTerminal (four.meme)"); }
+    catch (e) { continue; } // keep whatever pages succeeded
+    for (const pool of (data && data.data) || []) {
+      const t = geckoPoolToToken(pool, "bsc", "bsc");
+      if (!t || seen.has(t.mint)) continue;
+      seen.add(t.mint);
+      const dex = pool.relationships && pool.relationships.dex && pool.relationships.dex.data;
+      if (dex && dex.id === "four-meme") t.fourmeme = true;
+      tokens.push(t);
+    }
+  }
+  return tokens;
+}
+
+// Pump.fun bonding-curve tokens (pre-graduation), via GeckoTerminal's
+// pump-fun dex index — pump.fun's own API blocks browsers.
+async function discoverPumpFun() {
+  const tokens = [];
+  const seen = new Set();
+  for (let page = 1; page <= 2; page++) {
+    if (page > 1) await sleep(600);
+    let data;
+    try {
+      data = await fetchJsonPaced(
+        "https://api.geckoterminal.com/api/v2/networks/solana/dexes/pump-fun/pools?page=" + page,
+        "GeckoTerminal (pump.fun)"
+      );
+    } catch (e) { continue; } // keep whatever pages succeeded
+    for (const pool of (data && data.data) || []) {
+      const t = geckoPoolToToken(pool);
+      if (!t || seen.has(t.mint)) continue;
+      seen.add(t.mint);
+      t.pumpfun = true;
+      t.curveAddress = t.poolAddress; // pump.fun "pool" IS the bonding curve account
+      tokens.push(t);
+    }
+  }
+  return tokens;
+}
+
+// Convert a DexScreener pair object to our internal pair shape
+function pairFromDex(p, fallbackChain) {
+  const mint = p.baseToken && p.baseToken.address;
+  const chain = p.chainId || fallbackChain;
+  // Social/branding data from the pair listing — lets tokens that didn't come
+  // through the profiles feed (trending, pump.fun) still earn a lore reading
+  const info = p.info || {};
+  const linkTypes = new Set();
+  for (const w of info.websites || []) linkTypes.add("website");
+  for (const s of info.socials || []) linkTypes.add(((s.type || "link") + "").toLowerCase());
+  const infoProfile = (linkTypes.size || info.header || info.imageUrl)
+    ? { description: "", linkTypes, hasHeader: !!info.header, hasIcon: !!info.imageUrl, cto: false }
+    : null;
+  return {
+    infoProfile,
+    chain,
+    symbol: (p.baseToken.symbol || "").trim() || mint.slice(0, 6),
+    name: p.baseToken.name || "",
+    icon: p.info && p.info.imageUrl,
+    liquidity: (p.liquidity && p.liquidity.usd) || 0,
+    volume24: (p.volume && p.volume.h24) || 0,
+    marketCap: p.marketCap != null ? p.marketCap : null,
+    fdv: p.fdv != null ? p.fdv : null,
+    createdAt: p.pairCreatedAt || null,
+    change1h: p.priceChange && p.priceChange.h1 != null ? p.priceChange.h1 : null,
+    change6h: p.priceChange && p.priceChange.h6 != null ? p.priceChange.h6 : null,
+    change24h: p.priceChange && p.priceChange.h24 != null ? p.priceChange.h24 : null,
+    buys: p.txns && p.txns.h24 ? p.txns.h24.buys : null,
+    sells: p.txns && p.txns.h24 ? p.txns.h24.sells : null,
+    buys1h: p.txns && p.txns.h1 ? p.txns.h1.buys : null,
+    sells1h: p.txns && p.txns.h1 ? p.txns.h1.sells : null,
+    url: p.url || "https://dexscreener.com/" + chain + "/" + mint,
+  };
+}
+
+// Batch market data: DexScreener pairs, 30 addresses per call, grouped per
+// chain; keep the highest-liquidity pair per token.
+async function fetchMarketData(tokens) {
+  const byChain = new Map();
+  for (const t of tokens) {
+    if (!byChain.has(t.chain)) byChain.set(t.chain, []);
+    byChain.get(t.chain).push(t.mint);
+  }
+  const byKey = new Map();
+  let firstCall = true;
+  for (const [chain, mints] of byChain) {
+    for (let i = 0; i < mints.length; i += 30) {
+      if (!firstCall) await sleep(250);
+      firstCall = false;
+      const chunk = mints.slice(i, i + 30);
+      const pairs = await fetchJson(
+        "https://api.dexscreener.com/tokens/v1/" + chain + "/" + chunk.join(","),
+        "DexScreener pairs"
+      );
+      for (const p of pairs || []) {
+        const mint = p.baseToken && p.baseToken.address;
+        if (!mint) continue;
+        const key = tokenKey(p.chainId || chain, mint);
+        const liq = (p.liquidity && p.liquidity.usd) || 0;
+        const existing = byKey.get(key);
+        if (existing && existing.liquidity >= liq) continue;
+        byKey.set(key, pairFromDex(p, chain));
+      }
+    }
+  }
+  return byKey;
+}
+
+/* ---------- momentum heuristic ---------- */
+
+// 0-100 "heat" score from signals traders watch for early movers.
+// Heuristic only — it measures current activity, it does not predict anything.
+function heatScore(pair, boosted) {
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  let score = 0;
+  // Buy pressure: share of buys in 24h txns (0.5 = neutral). 30 pts.
+  if (pair.buys != null && pair.sells != null && pair.buys + pair.sells >= 20) {
+    score += 30 * clamp01((pair.buys / (pair.buys + pair.sells) - 0.35) / 0.4);
+  }
+  // Turnover: 24h volume relative to mcap/FDV — high churn means live interest. 30 pts.
+  const cap = pair.marketCap != null ? pair.marketCap : pair.fdv;
+  if (cap > 0 && pair.volume24 > 0) {
+    score += 30 * clamp01((pair.volume24 / cap) / 3);
+  }
+  // Short-term price action: +1h move, capped so a +50% candle maxes it. 25 pts.
+  if (pair.change1h != null) {
+    score += 25 * clamp01(pair.change1h / 50);
+  }
+  // 24h trend still positive but not already fully mooned. 10 pts.
+  if (pair.change24h != null) {
+    score += 10 * clamp01(pair.change24h / 100);
+  }
+  // Paying for a DexScreener boost = active promotion. 5 pts.
+  if (boosted) score += 5;
+  return Math.round(score);
+}
+
+// Duplicate-CA detection: same-ticker coins in one scan are usually one real
+// launch plus copycat squats. The market-dominant CA (deepest liquidity) is
+// marked PRIMARY; the rest are flagged DUPE and grade-capped. "Primary" means
+// "winning the name in this scan", not proof of authenticity.
+function detectDupes(tokens) {
+  const bySym = new Map();
+  for (const t of tokens) {
+    t.dupeOf = null; t.dupeCount = 0;
+    const key = (t.pair.symbol || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (key.length < 2) continue;
+    if (!bySym.has(key)) bySym.set(key, []);
+    bySym.get(key).push(t);
+  }
+  for (const group of bySym.values()) {
+    if (group.length < 2) continue;
+    let primary = group[0];
+    for (const t of group) if ((t.pair.liquidity || 0) > (primary.pair.liquidity || 0)) primary = t;
+    for (const t of group) {
+      if (t === primary) t.dupeCount = group.length - 1;
+      else t.dupeOf = primary.pair.symbol;
+    }
+  }
+}
+
+// Trend / engagement score (0-100): how much crowd is on this coin right now.
+// Measures participation (trades, breadth, acceleration, socials, boost spend),
+// not price. Components with no data are skipped and the score renormalized.
+function trendAssess(t) {
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  const p = t.pair;
+  const pts = [];
+  let earned = 0, possible = 0;
+  const add = (weight, frac, ok, text) => {
+    earned += weight * clamp01(frac);
+    possible += weight;
+    pts.push({ ok, text });
+  };
+
+  const tx24 = (p.buys || 0) + (p.sells || 0);
+  if (p.buys != null && p.sells != null) {
+    // 30 pts: raw participation — 1000+ trades/24h is a busy memecoin
+    add(30, Math.log10(1 + tx24) / 3, tx24 >= 300, tx24 + " trades in 24h — " + (tx24 >= 300 ? "active" : "sparse"));
+  }
+  const tx1 = (p.buys1h || 0) + (p.sells1h || 0);
+  if (tx24 > 0 && (p.buys1h != null || p.sells1h != null)) {
+    // 25 pts: acceleration — last-hour trade rate vs the 24h hourly average
+    const ratio = (tx1 * 24) / tx24;
+    add(25, (ratio - 0.3) / 1.7, ratio >= 1, "last-hour trade rate " + ratio.toFixed(1) + "× the 24h average — " + (ratio >= 1 ? "crowd arriving" : "crowd thinning"));
+  }
+  if (tx24 >= 20 && p.volume24 > 0) {
+    // 15 pts: breadth — small average trades = many small wallets, not a few whales
+    const avg = p.volume24 / tx24;
+    add(15, (2000 - avg) / 1800, avg <= 500, "avg trade " + fmtUsd(avg) + " — " + (avg <= 500 ? "retail-sized (broad crowd)" : "whale-sized (narrow crowd)"));
+  }
+  if (t.socials != null) {
+    // 20 pts: social footprint on the DexScreener profile
+    add(20, t.socials / 3, t.socials >= 2, t.socials + " social/link type" + (t.socials === 1 ? "" : "s") + " on profile" + (t.socials === 0 ? " — anonymous launch" : ""));
+  }
+  if (t.boostAmount != null) {
+    // 10 pts: paid DexScreener boosts — bought attention still draws eyes
+    add(10, t.boostAmount / 200, t.boostAmount > 0, t.boostAmount > 0 ? t.boostAmount + " boost points purchased" : "no paid boosts");
+  }
+
+  const score = possible > 0 ? Math.round(100 * earned / possible) : null;
+  return { score, pts };
+}
+
+function trendHtml(t) {
+  const tr = t.trend || (t.trend = trendAssess(t));
+  if (tr.score == null) return "";
+  return '<span>Trend <b>' + (tr.score >= 70 ? "📈 " : "") + tr.score + '</b></span>';
+}
+
+// Lore score (0-100): how deep the story goes. Measures the coin's observable
+// narrative footprint on its DexScreener profile — written mythology, world
+// breadth across platforms, branding investment, community takeover.
+function loreAssess(t) {
+  const p = t.profile;
+  if (!p) return { score: null, pts: [] };
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  const pts = [];
+  let score = 0;
+
+  // 40 pts: story depth — a written narrative, scaled by substance
+  const words = p.description ? p.description.split(/\s+/).filter(Boolean).length : 0;
+  score += 40 * clamp01(words / 60);
+  pts.push({ ok: words >= 20, text: words === 0 ? "no written story — blank profile"
+    : words + "-word story on the profile — " + (words >= 60 ? "full mythology" : words >= 20 ? "has a narrative" : "one-liner") });
+
+  // 30 pts: world breadth — website, community chat, cross-platform presence
+  const lt = p.linkTypes;
+  const hasSite = lt.has("website");
+  const hasChat = lt.has("telegram") || lt.has("discord");
+  const extras = ["tiktok", "instagram", "youtube", "reddit", "medium", "github"].filter((x) => lt.has(x));
+  if (hasSite) score += 10;
+  pts.push({ ok: hasSite, text: hasSite ? "has a website" : "no website" });
+  if (hasChat) score += 10;
+  pts.push({ ok: hasChat, text: hasChat ? "has a community chat (Telegram/Discord)" : "no community chat" });
+  score += 10 * clamp01(extras.length / 2);
+  pts.push({ ok: extras.length > 0, text: extras.length > 0 ? "present on " + extras.join(", ") : "no presence beyond X/chat" });
+
+  // 15 pts: branding investment — custom icon and header art
+  if (p.hasIcon) score += 5;
+  if (p.hasHeader) score += 10;
+  pts.push({ ok: p.hasIcon && p.hasHeader, text: p.hasIcon && p.hasHeader ? "custom icon + header art" : p.hasIcon ? "icon only, no header art" : "no branding assets" });
+
+  // 15 pts: community takeover — the community adopted an abandoned coin
+  if (p.cto) { score += 15; pts.push({ ok: true, text: "community takeover (CTO) — the crowd owns this story now" }); }
+
+  return { score: Math.round(score), pts };
+}
+
+// Narrative radar: discover the scan's live metas from the data itself —
+// terms shared by 3+ coins' symbols/names/stories, ranked by combined volume.
+// Self-updating as metas rotate; no hardcoded narrative list to go stale.
+const NARRATIVE_STOPWORDS = new Set(("the and for with this that from your you are was were have has will all not but its can our out now new just more than into only one who what when where why how made make get got token coin meme memecoin crypto chain sol solana bsc eth base pump fun launch official community world most every people time like dont don yes his her they them lol very first best good big about were street usdt usdc busd dai wsol wbnb weth wrapped").split(" "));
+
+function detectNarratives(tokens) {
+  const termMap = new Map();
+  tokens.forEach((t, i) => {
+    const text = ((t.pair.symbol || "") + " " + (t.pair.name || "") + " " +
+      ((t.profile && t.profile.description) || "")).toLowerCase();
+    // latin terms of 3+ chars, plus CJK runs of 2+ chars — the BNB meta is
+    // substantially Chinese-language and must not be tokenized away
+    const words = new Set((text.match(/[a-z0-9]{3,}|[一-鿿]{2,}/g) || []).filter((w) =>
+      !NARRATIVE_STOPWORDS.has(w) && !/^\d+$/.test(w)));
+    for (const w of words) {
+      if (!termMap.has(w)) termMap.set(w, new Set());
+      termMap.get(w).add(i);
+    }
+  });
+  const clusters = [...termMap.entries()]
+    .filter(([, s]) => s.size >= 3)
+    .map(([term, s]) => ({
+      term, count: s.size,
+      vol: [...s].reduce((sum, i) => sum + (tokens[i].pair.volume24 || 0), 0),
+      members: s,
+    }))
+    .sort((a, b) => b.vol - a.vol)
+    .slice(0, 6);
+  tokens.forEach((t, i) => {
+    for (const c of clusters) if (c.members.has(i)) { t.narrative = c.term; break; }
+  });
+  return clusters;
+}
+
+function renderMetaRadar(clusters) {
+  const el = $("metaRadar");
+  if (!clusters.length) { el.innerHTML = ""; return; }
+  el.innerHTML = '<div class="radar"><span class="radar-label">Narratives in this scan:</span>' +
+    clusters.map((c) =>
+      '<span class="radar-chip" title="' + c.count + ' coins share this term — combined 24h volume ' + fmtUsd(c.vol) + '">' +
+      (c.count >= 5 ? "🔥 " : "") + esc(c.term) + ' <b>×' + c.count + '</b></span>').join("") +
+    '</div>';
+}
+
+// Gap score: the trader's "narrative strength vs how much is priced in".
+// attention (trend+lore) minus priced-in (mcap tier + how far price already
+// ran). Positive = attention exceeds pricing; negative = move already priced.
+// A reading of the present — not a prediction that the gap closes upward.
+function gapScore(t) {
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  const cap = t.pair.marketCap != null ? t.pair.marketCap : (t.pair.fdv || 0);
+  if (!(cap > 0)) return null;
+  const attention = 0.6 * ((t.trend && t.trend.score) || 0) + 0.4 * ((t.lore && t.lore.score) || 0);
+  const capFrac = clamp01(Math.log10(Math.max(cap, 1e4) / 1e5) / 2);       // $100K→0, $10M→1
+  const ranFrac = clamp01(Math.max(t.pair.change24h || 0, 0) / 300);       // +300% 24h→fully run
+  const pricedIn = 100 * (0.5 * capFrac + 0.5 * ranFrac);
+  return Math.round(attention - pricedIn);
+}
+
+// Composite grade A-F: relative signal quality within this scan, weighted
+// toward risk evidence (security, holder research, exit depth) over activity.
+// Hard gates: FAIL verdict = F always; unknown verdict, thin exit depth, or
+// unvalidated pump curve cap the tier at C. NOT a buy list — most memecoins
+// go to zero regardless of grade; a good grade only means "not rigged".
+function gradeAssess(t) {
+  if (!t.verdict || t.verdict === "pending") return null;
+  if (t.verdict === "fail") return { tier: "F", score: 0 };
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  const cap = t.pair.marketCap != null ? t.pair.marketCap : (t.pair.fdv || 0);
+  const liq = t.pair.liquidity || 0;
+  let score = 0;
+  // 35: security verdict
+  score += t.verdict === "pass" ? 35 : t.verdict === "caution" ? 15 : 5;
+  // 25: deep-research checks (holders, concentration, LP lock, insiders)
+  if (t.research && t.research.length) {
+    score += 25 * t.research.filter((p) => p.ok).length / t.research.length;
+  }
+  // 15: exit depth — liquidity relative to mcap and in absolute terms
+  if (cap > 0) score += 7.5 * clamp01((liq / cap) / 0.08);
+  score += 7.5 * clamp01(liq / 10000);
+  // 5: structural validation (pump.fun curve traction, when applicable)
+  const curveValidated = !t.pumpfun || (t.curve && (t.curve.complete || t.curve.progress >= 15));
+  if (curveValidated) score += 5;
+  // 20: activity, weighted by lifecycle stage. Early coins have no track
+  // record, so story + real trading volume carry the signal; established
+  // coins (incl. dip-recovery candidates) live on whether the crowd returns.
+  const ageH = t.pair.createdAt ? (Date.now() - t.pair.createdAt) / 3.6e6 : Infinity;
+  const isEarlyStage = ageH < 24 || (t.pumpfun && t.curve && !t.curve.complete);
+  const volFrac = 0.5 * clamp01((t.pair.volume24 || 0) / 50000) +
+                  0.5 * (cap > 0 ? clamp01(((t.pair.volume24 || 0) / cap) / 2) : 0);
+  const loreFrac = t.lore && t.lore.score != null ? t.lore.score / 100 : 0;
+  const trendFrac = t.trend && t.trend.score != null ? t.trend.score / 100 : 0;
+  score += isEarlyStage
+    ? 8 * loreFrac + 8 * volFrac + 4 * trendFrac
+    : 10 * trendFrac + 8 * volFrac + 2 * loreFrac;
+  // caps: unverified, hard-to-exit, or copycat coins can't grade above C
+  let capTier = 100;
+  if (t.verdict === "unknown") capTier = 59;
+  if (t.dupeOf) capTier = Math.min(capTier, 59);
+  if (!curveValidated) capTier = Math.min(capTier, 59);
+  if (liq < 1000 || (cap > 0 && liq / cap < 0.02)) capTier = Math.min(capTier, 59);
+  score = Math.min(Math.round(score), capTier);
+  const tier = score >= 75 ? "A" : score >= 60 ? "B" : score >= 40 ? "C" : "D";
+  return { tier, score };
+}
+
+const GRADE_TITLE = {
+  A: "A — strongest evidence stack in this scan (clean security, healthy structure, real exit depth). Still a lottery ticket: most memecoins go to zero regardless of grade. Not a buy recommendation.",
+  B: "B — decent signals with some gaps. Relative quality only — not a buy recommendation.",
+  C: "C — weak, unverified, or hard to exit. Relative quality only — not a buy recommendation.",
+  D: "D — high risk: poor signals across the board.",
+  F: "F — failed the security check. Avoid.",
+};
+
+function gradeHtml(t) {
+  const g = gradeAssess(t);
+  if (!g) return "";
+  return '<span class="grade g-' + g.tier + '" title="' + esc(GRADE_TITLE[g.tier]) + '">' + g.tier + '</span>';
+}
+
+// The observable pre-explosion profile: cleared the rug check, momentum fresh
+// but the move still small, crowd arriving, micro-cap. Coins that later 100x
+// mostly looked like this — but so do many that die; it's a hunting ground,
+// not a prediction.
+function isSetup(t) {
+  const cap = t.pair.marketCap != null ? t.pair.marketCap : t.pair.fdv;
+  // pump.fun coins must also show validated on-chain curve traction —
+  // no curve data means unvalidated, which means no star
+  if (t.pumpfun && !(t.curve && (t.curve.complete || t.curve.progress >= 15))) return false;
+  return t.verdict === "pass" &&
+    t.runway && t.runway.phase === "early" &&
+    t.trend && (t.trend.score || 0) >= 60 &&
+    cap > 0 && cap < 1e6;
+}
+
+// The dip-recovery shape: real prior sell-off, turning up right now with
+// buyers returning, and a narrative that gives the crowd a reason to come
+// back. A shape, not a probability — most dipped coins keep falling.
+function isRebound(t) {
+  const p = t.pair;
+  if (p.change24h == null || p.change24h > -20) return false;      // real sell-off
+  if (p.change1h == null || p.change1h <= 0) return false;         // turning up now
+  const t1 = (p.buys1h || 0) + (p.sells1h || 0);
+  if (t1 >= 10 && p.buys1h / t1 < 0.5) return false;               // buyers back
+  const lo = t.lore || (t.lore = loreAssess(t));
+  return (lo.score || 0) >= 40;                                     // has a story
+}
+
+function loreHtml(t) {
+  const lo = t.lore || (t.lore = loreAssess(t));
+  if (lo.score == null) return "";
+  return '<span>Lore <b>' + (lo.score >= 70 ? "📖 " : "") + lo.score + '</b></span>';
+}
+
+// Run-room assessment: is the move still fed, or exhausted? Heuristic — NOT a
+// prediction. Classifies each token as EARLY / RUNNING / EXTENDED / QUIET from
+// signals traders use to judge whether a pump has anything left behind it.
+function runwayAssess(pair) {
+  const pts = [];
+  const cap = pair.marketCap != null ? pair.marketCap : pair.fdv;
+  const c1 = pair.change1h, c6 = pair.change6h, c24 = pair.change24h;
+  let freshVotes = 0, freshChecks = 0;
+
+  if (c1 != null) {
+    freshChecks++;
+    const ok = c1 > 0;
+    if (ok) freshVotes++;
+    pts.push({ ok, text: "1h price " + (c1 > 0 ? "+" : "") + c1.toFixed(1) + "% — " + (ok ? "still moving up" : "rolling over") });
+  }
+  if (c1 != null && c6 != null && c6 !== 0) {
+    freshChecks++;
+    const pace6 = c6 / 6; // avg hourly pace over 6h
+    const ok = c1 > 0 && c1 >= pace6;
+    if (ok) freshVotes++;
+    pts.push({ ok, text: "vs 6h pace (" + (pace6 > 0 ? "+" : "") + pace6.toFixed(1) + "%/h): " + (ok ? "accelerating" : "decelerating") });
+  }
+  const t1 = (pair.buys1h || 0) + (pair.sells1h || 0);
+  if (t1 >= 10) {
+    freshChecks++;
+    const pct1 = 100 * pair.buys1h / t1;
+    const t24 = (pair.buys || 0) + (pair.sells || 0);
+    const pct24 = t24 > 0 ? 100 * pair.buys / t24 : null;
+    const ok = pct1 >= 52 && (pct24 == null || pct1 >= pct24 - 5);
+    if (ok) freshVotes++;
+    pts.push({ ok, text: "last-hour buys " + pct1.toFixed(0) + "%" + (pct24 != null ? " (24h avg " + pct24.toFixed(0) + "%)" : "") + " — " + (ok ? "buyers still dominant" : "buy pressure fading") });
+  }
+  if (cap > 0) {
+    const ok = cap < 1e6;
+    const tier = cap < 25e4 ? "micro-cap — most theoretical headroom (and most risk)"
+      : cap < 1e6 ? "small — meaningful headroom possible"
+      : cap < 1e7 ? "mid-size for a memecoin — big multiples get harder"
+      : "large for a memecoin — further 10x moves are rare";
+    pts.push({ ok, text: "mcap " + fmtUsd(cap) + ": " + tier });
+  }
+  if (cap > 0 && pair.liquidity > 0) {
+    const ratio = pair.liquidity / cap;
+    const ok = ratio >= 0.05;
+    pts.push({ ok, text: "liquidity " + (100 * ratio).toFixed(1) + "% of mcap — " + (ok ? "reasonable exit depth" : ratio < 0.02 ? "very thin: one big sell can end the move" : "thin exit depth") });
+  }
+
+  const fresh = freshChecks > 0 && freshVotes * 2 > freshChecks; // majority of momentum signals positive
+  const big = c24 != null && c24 >= 300;
+  let phase, note;
+  if (fresh && !big) { phase = "early"; note = "Momentum is fresh and the 24h move isn't huge yet."; }
+  else if (fresh && big) { phase = "running"; note = "Already up big but still being bought — chasing here is high risk."; }
+  else if (!fresh && big) { phase = "extended"; note = "Big move with fading momentum — the easy part is likely over."; }
+  else { phase = "quiet"; note = "No strong momentum right now."; }
+  return { phase, note, pts };
+}
+
+const PHASE_BADGE = {
+  early:    { cls: "ph-early",    text: "EARLY" },
+  running:  { cls: "ph-running",  text: "RUNNING" },
+  extended: { cls: "ph-extended", text: "EXTENDED" },
+  quiet:    { cls: "ph-quiet",    text: "QUIET" },
+};
+
+function heatHtml(t) {
+  const h = t.heat != null ? t.heat : (t.heat = heatScore(t.pair, t.boosted));
+  const flame = h >= 70 ? "🔥 " : "";
+  return '<span>Heat <b>' + flame + h + '</b></span>';
+}
+
+function pctHtml(label, v) {
+  if (v == null || isNaN(v)) return '<span>' + label + ' <b>–</b></span>';
+  const cls = v > 0 ? "up" : v < 0 ? "down" : "";
+  const sign = v > 0 ? "+" : "";
+  return '<span>' + label + ' <b class="' + cls + '">' + sign + v.toFixed(1) + '%</b></span>';
+}
+
+/* ---------- pump.fun on-chain curve validation ---------- */
+
+const SOLANA_RPC = "https://solana-rpc.publicnode.com";
+const PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+const CURVE_INITIAL_REAL_TOKENS = 793_100_000_000_000; // 793.1M tokens * 1e6
+
+// Read bonding-curve accounts straight from pump.fun's on-chain program via
+// batched RPC calls (public RPC caps getMultipleAccounts at ~10 addresses).
+// This is ground truth — curve progress and real SOL raised can't be faked
+// the way chart activity can. Mutates tokens with t.curve.
+async function fetchPumpCurves(tokens) {
+  for (let i = 0; i < tokens.length; i += 10) {
+    const chunk = tokens.slice(i, i + 10);
+    if (i > 0) await sleep(350);
+    let res;
+    try {
+      res = await fetch(SOLANA_RPC, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 1, method: "getMultipleAccounts",
+          params: [chunk.map((t) => t.curveAddress), { encoding: "base64" }],
+        }),
+      });
+    } catch (e) {
+      throw new NetworkError("Solana RPC");
+    }
+    if (res.status === 429) throw new RateLimitError("Solana RPC");
+    if (!res.ok) throw new HttpError("Solana RPC", res.status);
+    const data = await res.json();
+    const accounts = (data.result && data.result.value) || [];
+    chunk.forEach((t, j) => {
+      const acct = accounts[j];
+      if (!acct || acct.owner !== PUMP_PROGRAM || !acct.data) return;
+      const raw = Uint8Array.from(atob(acct.data[0]), (c) => c.charCodeAt(0));
+      if (raw.length < 49) return;
+      const dv = new DataView(raw.buffer);
+      const realToken = Number(dv.getBigUint64(24, true));
+      const realSol = Number(dv.getBigUint64(32, true)) / 1e9;
+      const complete = raw[48] === 1;
+      const progress = complete ? 100 : Math.max(0, Math.min(100, 100 * (1 - realToken / CURVE_INITIAL_REAL_TOKENS)));
+      t.curve = { progress, solRaised: realSol, complete };
+    });
+  }
+}
+
+function curvePoints(c) {
+  const pts = [];
+  if (c.complete) {
+    pts.push({ ok: true, text: "curve complete — graduated off the bonding curve" });
+  } else {
+    pts.push({ ok: c.progress >= 15, text: "curve " + c.progress.toFixed(1) + "% sold — " +
+      (c.progress < 15 ? "barely started (most curves die here)" : c.progress > 80 ? "near graduation" : "real traction") });
+    pts.push({ ok: c.solRaised >= 10, text: c.solRaised.toFixed(1) + " SOL of ~85 committed by buyers (on-chain)" });
+  }
+  return pts;
+}
+
+/* ---------- security checks: RugCheck (Solana) + GoPlus (EVM/Tron) ---------- */
+
+// Map a GoPlus token_security record to RugCheck-style {name, description, level} risks
+function goplusRisks(d) {
+  const risks = [];
+  const num = (x) => parseFloat(x) || 0;
+  const flag = (cond, level, name, description) => { if (cond) risks.push({ name, description, level }); };
+  const buyTax = num(d.buy_tax), sellTax = num(d.sell_tax);
+  const taxTxt = "Buy tax " + Math.round(buyTax * 100) + "%, sell tax " + Math.round(sellTax * 100) + "%.";
+  flag(d.is_honeypot === "1", "danger", "Honeypot", "Sell simulation fails — holders cannot sell this token.");
+  flag(d.cannot_sell_all === "1", "danger", "Cannot sell all", "Holders are blocked from selling their full balance.");
+  flag(d.transfer_pausable === "1", "danger", "Pausable transfers", "The owner can pause transfers and block sells.");
+  flag(d.is_mintable === "1", "danger", "Mintable", "The owner can mint new tokens and dilute holders.");
+  flag(d.owner_change_balance === "1", "danger", "Owner can edit balances", "The contract owner can modify holder balances.");
+  flag(d.selfdestruct === "1", "danger", "Self-destruct", "The contract contains a self-destruct function.");
+  flag(d.hidden_owner === "1", "danger", "Hidden owner", "Ownership is obscured — 'renounced' may not be real.");
+  flag(buyTax >= 0.1 || sellTax >= 0.1, "danger", "High trading tax", taxTxt);
+  flag((buyTax > 0 || sellTax > 0) && buyTax < 0.1 && sellTax < 0.1, "warn", "Trading tax", taxTxt);
+  flag(d.is_open_source === "0", "warn", "Unverified contract", "Source code is not verified — hidden logic is possible.");
+  flag(d.is_proxy === "1", "warn", "Upgradeable proxy", "Contract logic can be changed after deployment.");
+  flag(d.is_blacklisted === "1", "warn", "Blacklist function", "The owner can block specific addresses from trading.");
+  flag(d.can_take_back_ownership === "1", "warn", "Ownership reclaimable", "Renounced ownership can be taken back.");
+  flag(d.trading_cooldown === "1", "warn", "Trading cooldown", "Trades are rate-limited per address.");
+  flag(d.anti_whale_modifiable === "1", "warn", "Modifiable anti-whale", "The owner can change transaction limits.");
+  return risks;
+}
+
+const verdictFromRisks = (risks) =>
+  risks.some((r) => r.level === "danger") ? "fail" :
+  risks.some((r) => r.level === "warn") ? "caution" : "pass";
+
+// Check one GoPlus chunk (same-chain tokens); mutates each token in place
+async function goplusCheckChunk(chain, chunk) {
+  const gpId = CHAIN_INFO[chain].gp;
+  const res = await fetchJson(
+    "https://api.gopluslabs.io/api/v1/token_security/" + gpId +
+    "?contract_addresses=" + chunk.map((t) => t.mint).join(","),
+    "GoPlus"
+  );
+  for (const t of chunk) {
+    const d = res && res.result && res.result[t.mint.toLowerCase()];
+    if (!d) {
+      t.verdict = "unknown";
+      t.checkError = "GoPlus has no data for this token yet (often true for very new launches).";
+      continue;
+    }
+    t.risks = goplusRisks(d);
+    t.verdict = verdictFromRisks(t.risks);
+    t.score = null;
+    t._gp = d; // keep full record — deep research reads holders/LP from it for free
+    const hc = parseInt(d.holder_count, 10);
+    if (!isNaN(hc)) t.holders = hc;
+  }
+}
+
+// Deep research for tokens that cleared the rug check: who holds the supply,
+// is the LP locked, does the creator still hold, are insiders detected.
+// Solana → RugCheck full report; EVM → the GoPlus record already fetched.
+async function researchToken(t) {
+  const num = (x) => parseFloat(x) || 0;
+  try {
+    if (t.chain === "solana") {
+      const d = await fetchJson("https://api.rugcheck.xyz/v1/tokens/" + t.mint + "/report", "RugCheck report");
+      const pts = [];
+      const known = d.knownAccounts || {};
+      const isPool = (h) => {
+        const k = known[h.address] || known[h.owner];
+        return k && (k.type === "AMM" || k.type === "LP");
+      };
+      const holders = d.totalHolders;
+      if (holders != null) pts.push({ ok: holders >= 500, text: holders.toLocaleString() + " holders" + (holders < 500 ? " — small base" : "") });
+      const th = (d.topHolders || []).filter((h) => !isPool(h));
+      const top10 = th.slice(0, 10).reduce((s, h) => s + (h.pct || 0), 0);
+      pts.push({ ok: top10 <= 30, text: "top 10 wallets hold " + top10.toFixed(1) + "% (pools excluded)" + (top10 > 30 ? " — concentrated" : "") });
+      let lpMax = 0;
+      for (const m of d.markets || []) if (m.lp && m.lp.lpLockedPct != null) lpMax = Math.max(lpMax, m.lp.lpLockedPct);
+      pts.push({ ok: lpMax >= 80, text: "LP " + lpMax.toFixed(0) + "% locked/burned (best market)" });
+      const creatorPct = (d.topHolders || [])
+        .filter((h) => h.owner === d.creator || h.address === d.creator)
+        .reduce((s, h) => s + (h.pct || 0), 0);
+      pts.push({ ok: creatorPct <= 5, text: "creator holds " + creatorPct.toFixed(1) + "% of supply" });
+      const insiders = d.graphInsidersDetected || 0;
+      pts.push({ ok: insiders === 0, text: insiders === 0 ? "no insider wallet networks detected"
+        : insiders + " insider wallets in " + (d.insiderNetworks || []).length + " network(s) — supply may be coordinated" });
+      if (d.rugged) pts.push({ ok: false, text: "RugCheck marks this token as RUGGED" });
+      if (t.holders == null && holders != null) t.holders = holders;
+      t.research = pts;
+    } else if (t._gp) {
+      const d = t._gp;
+      const pts = [];
+      const holders = parseInt(d.holder_count, 10);
+      if (!isNaN(holders)) pts.push({ ok: holders >= 500, text: holders.toLocaleString() + " holders" + (holders < 500 ? " — small base" : "") });
+      const hs = (d.holders || []).filter((h) => h.is_contract !== 1 && h.is_locked !== 1);
+      const top10 = 100 * hs.slice(0, 10).reduce((s, h) => s + num(h.percent), 0);
+      pts.push({ ok: top10 <= 30, text: "top 10 wallets hold " + top10.toFixed(1) + "% (contracts/locked excluded)" + (top10 > 30 ? " — concentrated" : "") });
+      const lpLocked = 100 * (d.lp_holders || []).reduce((s, h) => s + (h.is_locked === 1 ? num(h.percent) : 0), 0);
+      pts.push({ ok: lpLocked >= 50, text: "LP " + lpLocked.toFixed(0) + "% locked/burned" });
+      const cPct = 100 * num(d.creator_percent);
+      pts.push({ ok: cPct <= 5, text: "creator holds " + cPct.toFixed(1) + "% of supply" });
+      if (d.owner_percent != null && d.owner_percent !== "") {
+        const oPct = 100 * num(d.owner_percent);
+        pts.push({ ok: oPct <= 5, text: "owner holds " + oPct.toFixed(1) + "% of supply" });
+      }
+      t.research = pts;
+    } else {
+      t.researchError = "No research source available for this chain.";
+    }
+    // Bubblemaps wallet-cluster map: flag when one exists (new coins often
+    // aren't computed yet — absence is not a red flag, so no ✕ row for it)
+    const bm = BUBBLEMAPS_CHAINS[t.chain];
+    if (bm && t.research) {
+      try {
+        const av = await fetchJson(
+          "https://api-legacy.bubblemaps.io/map-availability?chain=" + bm + "&token=" + t.mint,
+          "Bubblemaps"
+        );
+        if (av && av.availability) {
+          t.research.push({ ok: true, text: "Bubblemaps wallet-cluster map exists — eyeball connected-wallet bubbles via the link below" });
+          t.hasBubblemap = true;
+        }
+      } catch (e) { /* availability check is best-effort */ }
+    }
+    // 𝕏 mentions via the user's own proxy (only when configured — costs credits)
+    if (t.research) {
+      try {
+        const buzz = await xBuzz(t.mint);
+        if (buzz) {
+          t.xBuzz = buzz;
+          t.research.push(buzz.tweets === 0
+            ? { ok: false, text: "𝕏: no tweets mention this CA — no visible community" }
+            : { ok: buzz.authors >= 5, text: "𝕏: " + buzz.tweets + " recent tweet(s) by " + buzz.authors + " account(s) mention this CA" +
+                (buzz.topFollowers ? " (top account " + fmtUsd(buzz.topFollowers).replace("$", "") + " followers)" : "") +
+                (buzz.authors < 5 && buzz.tweets >= 5 ? " — few voices, possible bot spam" : "") });
+        }
+      } catch (e) {
+        t.research.push({ ok: false, text: "𝕏 check failed: " + describeError(e, "").trim() });
+      }
+    }
+  } catch (e) {
+    t.researchError = describeError(e, "researching " + t.pair.symbol);
+  }
+}
+
+// 𝕏 buzz via the user's own Cloudflare Worker proxy (x-proxy-worker.js):
+// who is actually tweeting this contract address? Unique authors is the
+// honest metric — 40 tweets from one bot account is silence with extra steps.
+async function xBuzz(mint) {
+  const base = ((localStorage.getItem("x-proxy-url") || "").trim()).replace(/\/+$/, "");
+  if (!base) return null;
+  let res;
+  try {
+    res = await fetch(base + "/?q=" + encodeURIComponent(mint));
+  } catch (e) {
+    throw new NetworkError("𝕏 proxy");
+  }
+  if (res.status === 429 || res.status === 402) throw new RateLimitError("𝕏 API (credits/rate)");
+  if (!res.ok) throw new HttpError("𝕏 proxy", res.status);
+  const data = await res.json();
+  const tweets = (data && data.tweets) || [];
+  const authors = new Set();
+  let topFollowers = 0, engagement = 0;
+  for (const t of tweets) {
+    const a = t.author || {};
+    if (a.userName) authors.add(a.userName);
+    topFollowers = Math.max(topFollowers, a.followers || 0);
+    engagement += (t.likeCount || 0) + (t.retweetCount || 0) + (t.replyCount || 0);
+  }
+  return { tweets: tweets.length, authors: authors.size, topFollowers, engagement };
+}
+
+// Single-token security check, routed by chain; mutates the token
+async function securityCheckOne(t) {
+  try {
+    if (t.chain === "solana") {
+      const r = await rugcheckToken(t.mint);
+      t.verdict = r.verdict; t.risks = r.risks; t.score = r.score;
+    } else if (CHAIN_INFO[t.chain]) {
+      await goplusCheckChunk(t.chain, [t]);
+    } else {
+      t.verdict = "unknown";
+      t.checkError = 'No free security checker available for chain "' + t.chain + '" — verify manually.';
+    }
+  } catch (e) {
+    t.verdict = "unknown";
+    t.checkError = describeError(e, "checking " + t.pair.symbol);
+  }
+}
+
+async function rugcheckToken(mint) {
+  const url = "https://api.rugcheck.xyz/v1/tokens/" + mint + "/report/summary";
+  let summary;
+  try {
+    summary = await fetchJson(url, "RugCheck");
+  } catch (e) {
+    if (e instanceof RateLimitError) {
+      // one retry after a longer backoff
+      await sleep(5000);
+      summary = await fetchJson(url, "RugCheck");
+    } else {
+      throw e;
+    }
+  }
+  const risks = (summary && summary.risks) || [];
+  let verdict = "pass";
+  if (risks.some((r) => r.level === "danger")) verdict = "fail";
+  else if (risks.some((r) => r.level === "warn")) verdict = "caution";
+  return { verdict, risks, score: summary && summary.score_normalised };
+}
+
+const VERDICT_BADGE = {
+  pass:    { cls: "pass",    text: "✓ PASS" },
+  caution: { cls: "caution", text: "⚠ CAUTION" },
+  fail:    { cls: "fail",    text: "✕ FAIL" },
+  pending: { cls: "pending", text: "… CHECKING" },
+  unknown: { cls: "unknown", text: "? UNKNOWN" },
+};
+
+/* ---------- rendering ---------- */
+
+function tokenCard(t) {
+  const badge = VERDICT_BADGE[t.verdict] || VERDICT_BADGE.pending;
+  const ageH = t.pair.createdAt ? (Date.now() - t.pair.createdAt) / 3.6e6 : null;
+  return '' +
+    '<div class="card" id="card-' + esc(t.chain) + '-' + esc(t.mint) + '">' +
+      '<div class="card-head" data-mint="' + esc(t.mint) + '">' +
+        '<div class="tok-id">' +
+          (t.pair.icon ? '<img src="' + esc(t.pair.icon) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">' : "") +
+          '<div class="tok-name">' +
+            '<div class="sym">' + esc(t.pair.symbol) + ' <span class="chain-chip">' + esc(t.chain) + '</span>' + (t.pumpfun ? ' <span class="chain-chip pump-chip">pump.fun</span>' : "") + (t.fourmeme ? ' <span class="chain-chip pump-chip">four.meme</span>' : "") + (t.boosted ? ' <span title="Boosted on DexScreener">⚡</span>' : "") + '</div>' +
+            '<div class="nm">' + esc(t.pair.name) + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<span class="head-badges">' + gradeHtml(t) + '<span class="verdict ' + badge.cls + '">' + badge.text + '</span></span>' +
+        '<div class="metrics">' +
+          '<span>Liq <b>' + fmtUsd(t.pair.liquidity) + '</b></span>' +
+          '<span>Vol24h <b>' + fmtUsd(t.pair.volume24) + '</b></span>' +
+          '<span>MCap <b>' + fmtUsd(t.pair.marketCap != null ? t.pair.marketCap : t.pair.fdv) + '</b></span>' +
+          '<span>Age <b>' + fmtAge(ageH) + '</b></span>' +
+          pctHtml("Δ1h", t.pair.change1h) +
+          pctHtml("Δ24h", t.pair.change24h) +
+          (t.pair.buys != null && t.pair.sells != null && t.pair.buys + t.pair.sells > 0
+            ? '<span>Buys <b>' + Math.round(100 * t.pair.buys / (t.pair.buys + t.pair.sells)) + '%</b></span>' : "") +
+          heatHtml(t) +
+          trendHtml(t) +
+          loreHtml(t) +
+          (t.holders != null ? '<span>Holders <b>' + t.holders.toLocaleString() + '</b></span>' : "") +
+          (t.research ? '<span>Research <b>' + t.research.filter((p) => p.ok).length + "/" + t.research.length + '</b></span>' : "") +
+          (t.curve ? '<span>Curve <b>' + (t.curve.complete ? "grad" : t.curve.progress.toFixed(0) + "%") + '</b></span>' : "") +
+          (() => { const g = gapScore(t); return g == null ? "" :
+            '<span title="Attention (trend+lore) minus priced-in (mcap tier + 24h run). Positive = attention not yet priced in. A present-tense reading, not a prediction.">Gap <b>' + (g > 0 ? "+" : "") + g + '</b></span>'; })() +
+          (t.xBuzz ? '<span>𝕏 <b>' + t.xBuzz.authors + '</b></span>' : "") +
+          (t.narrative ? '<span>Meta <b>' + esc(t.narrative) + '</b></span>' : "") +
+          (() => { const p = PHASE_BADGE[(t.runway || (t.runway = runwayAssess(t.pair))).phase];
+                   return '<span class="phase ' + p.cls + '">' + p.text + '</span>'; })() +
+          (isSetup(t) ? '<span class="phase ph-setup" title="PASS + EARLY + trend ≥ 60 + micro-cap: the pre-run profile. Not a prediction.">⭐ SETUP</span>' : "") +
+          (isRebound(t) ? '<span class="phase ph-rebound" title="Sold off 20%+ over 24h, turning up in the last hour with buyers back, narrative present. A shape, not a probability — most dipped coins keep falling.">↩ REBOUND SHAPE</span>' : "") +
+          (t.dupeCount ? '<span class="phase ph-primary" title="' + t.dupeCount + ' other coin(s) in this scan share this ticker; this CA holds the deepest liquidity — chosen by market depth, not proof of authenticity. Verify via the 𝕏 search link.">① PRIMARY · ' + t.dupeCount + ' dupes</span>' : "") +
+          (t.dupeOf ? '<span class="phase ph-dupe" title="Another CA in this scan (' + esc(t.dupeOf) + ') holds far deeper liquidity for this ticker — this is likely a copycat squat. Grade capped at C.">⚠ DUPE</span>' : "") +
+        '</div>' +
+      '</div>' +
+      '<div class="card-body">' + cardBody(t) + '</div>' +
+    '</div>';
+}
+
+function cardBody(t) {
+  let riskHtml;
+  if (t.verdict === "pending") {
+    riskHtml = '<div class="risk"><span class="desc">RugCheck pending…</span></div>';
+  } else if (t.verdict === "unknown") {
+    riskHtml = '<div class="risk"><span class="desc">' + esc(t.checkError || "RugCheck unavailable for this token.") + '</span></div>';
+  } else if (!t.risks || t.risks.length === 0) {
+    riskHtml = '<div class="norisks">✓ No risks flagged by ' + (t.chain === "solana" ? "RugCheck" : "GoPlus") +
+      (t.score != null ? ' (score ' + t.score + '/100, lower is safer)' : '') + '</div>';
+  } else {
+    riskHtml = t.risks.map((r) =>
+      '<div class="risk">' +
+        '<span class="lvl ' + esc(r.level || "info") + '">' + esc((r.level || "info").toUpperCase()) + '</span>' +
+        '<span><span class="rname">' + esc(r.name) + '</span> &mdash; <span class="desc">' + esc(r.description || "") + '</span></span>' +
+      '</div>').join("");
+    if (t.score != null) riskHtml += '<div class="risk"><span class="desc">RugCheck risk score: ' + t.score + '/100 (lower is safer)</span></div>';
+  }
+  const rw = t.runway || (t.runway = runwayAssess(t.pair));
+  const tr = t.trend || (t.trend = trendAssess(t));
+  const sigRow = (p) =>
+    '<div class="risk"><span class="lvl ' + (p.ok ? "rw-ok" : "rw-no") + '">' + (p.ok ? "✓" : "✕") + '</span>' +
+    '<span class="desc">' + esc(p.text) + '</span></div>';
+  const curveHtml = t.curve
+    ? '<div class="rw">' +
+      '<div class="rw-head">Pump.fun curve — on-chain validation</div>' +
+      curvePoints(t.curve).map(sigRow).join("") +
+      '<div class="rw-note">Read directly from the bonding-curve account — buyers’ committed SOL, not chart activity.</div>' +
+      '</div>'
+    : (t.pumpfun ? '<div class="rw"><div class="rw-head">Pump.fun curve</div><div class="rw-note">Curve state unavailable (RPC unreachable) — traction unvalidated.</div></div>' : "");
+  const rwHtml = curveHtml + '<div class="rw">' +
+    '<div class="rw-head">Run-room signals — heuristic, not a prediction</div>' +
+    rw.pts.map(sigRow).join("") +
+    '<div class="rw-note">' + esc(rw.note) + '</div>' +
+  '</div>' +
+  (tr.score == null ? "" :
+  '<div class="rw">' +
+    '<div class="rw-head">Engagement signals — trend score ' + tr.score + '/100</div>' +
+    tr.pts.map(sigRow).join("") +
+  '</div>') +
+  (t.research ?
+  '<div class="rw">' +
+    '<div class="rw-head">Deep research — holders &amp; liquidity (' + t.research.filter((p) => p.ok).length + "/" + t.research.length + ' OK)</div>' +
+    t.research.map(sigRow).join("") +
+  '</div>'
+  : t.researchError ?
+  '<div class="rw"><div class="rw-head">Deep research</div><div class="rw-note">' + esc(t.researchError) + '</div></div>'
+  : "") +
+  (() => {
+    const lo = t.lore || (t.lore = loreAssess(t));
+    if (lo.score == null) return "";
+    return '<div class="rw">' +
+      '<div class="rw-head">Lore signals — score ' + lo.score + '/100</div>' +
+      lo.pts.map(sigRow).join("") +
+      (t.profile && t.profile.description
+        ? '<div class="lore-text">&ldquo;' + esc(t.profile.description.length > 420 ? t.profile.description.slice(0, 420) + "…" : t.profile.description) + '&rdquo;</div>'
+        : "") +
+    '</div>';
+  })();
+  const links = [];
+  if (t.chain === "solana") {
+    links.push(["RugCheck", "https://rugcheck.xyz/tokens/" + t.mint]);
+    links.push(["GMGN", "https://gmgn.ai/sol/token/" + t.mint]);
+    links.push(["Solscan", "https://solscan.io/token/" + t.mint]);
+  } else {
+    const ci = CHAIN_INFO[t.chain];
+    if (ci) links.push(["GoPlus", "https://gopluslabs.io/token-security/" + ci.gp + "/" + t.mint]);
+    if (ci && ci.gmgn) links.push(["GMGN", "https://gmgn.ai/" + ci.gmgn + "/token/" + t.mint]);
+    if (ci && ci.explorer) links.push(["Explorer", ci.explorer + t.mint]);
+  }
+  const bmCode = BUBBLEMAPS_CHAINS[t.chain];
+  if (bmCode) links.push(["Bubblemaps", "https://app.bubblemaps.io/" + bmCode + "/token/" + t.mint]);
+  links.push(["𝕏 CA search", "https://x.com/search?q=" + encodeURIComponent(t.mint) + "&f=live"]);
+  links.push(["DexScreener", t.pair.url]);
+  return rwHtml + riskHtml +
+    '<div class="mint-line">Address (' + esc(t.chain) + '): ' + esc(t.mint) + '</div>' +
+    '<div class="links">' +
+      links.map((l) => '<a target="_blank" rel="noopener" href="' + esc(l[1]) + '">' + esc(l[0]) + '</a>').join("") +
+    '</div>';
+}
+
+function rerenderCard(t, container) {
+  const old = (container || document).querySelector('[id="card-' + CSS.escape(t.chain + "-" + t.mint) + '"]');
+  if (!old) return;
+  const wasOpen = old.classList.contains("open");
+  const wrap = document.createElement("div");
+  wrap.innerHTML = tokenCard(t);
+  const fresh = wrap.firstChild;
+  if (wasOpen) fresh.classList.add("open");
+  old.replaceWith(fresh);
+}
+
+document.addEventListener("click", (e) => {
+  const head = e.target.closest(".card-head");
+  if (head && !e.target.closest("a")) head.parentElement.classList.toggle("open");
+});
+
+function setFunnel(fetched, live, filtered, passed) {
+  $("f-fetched").textContent = fetched == null ? "–" : fetched;
+  $("f-live").textContent = live == null ? "–" : live;
+  $("f-filtered").textContent = filtered == null ? "–" : filtered;
+  $("f-passed").textContent = passed == null ? "–" : passed;
+}
+
+/* ---------- main scan flow ---------- */
+
+async function runScan() {
+  if (scanning) return;
+  scanning = true;
+  $("scanBtn").disabled = true;
+  resultsEl.innerHTML = "";
+  setFunnel(null, null, null, null);
+
+  try {
+    // 1. Discover tokens
+    setStatus("Fetching latest + boosted Solana tokens from DexScreener…", "", true);
+    let tokens, usedFallback = false;
+    try {
+      tokens = await discoverTokens();
+    } catch (e) {
+      setStatus(describeError(e, "discovering tokens") + " Trying fallback source (GeckoTerminal, Solana only)…", "warn", true);
+      await sleep(600);
+      tokens = await discoverViaFallback();
+      usedFallback = true;
+    }
+    if ($("pumpFeed").checked && !usedFallback) {
+      setStatus("Fetched " + tokens.length + " tokens. Adding launchpad feeds (pump.fun + four.meme)…", "", true);
+      const known = new Map(tokens.map((t) => [tokenKey(t.chain, t.mint), t]));
+      try {
+        const pump = await discoverPumpFun();
+        for (const p of pump) {
+          const existing = known.get(tokenKey(p.chain, p.mint));
+          if (existing) { existing.pumpfun = true; existing.geckoPair = p.geckoPair; existing.curveAddress = p.curveAddress; }
+          else { known.set(tokenKey(p.chain, p.mint), p); tokens.push(p); }
+        }
+      } catch (e) {
+        setStatus(describeError(e, "loading pump.fun feed") + " Continuing without it…", "warn", true);
+        await sleep(800);
+      }
+      try {
+        const bsc = await discoverBscLaunches();
+        for (const p of bsc) {
+          const existing = known.get(tokenKey(p.chain, p.mint));
+          if (existing) { existing.fourmeme = existing.fourmeme || p.fourmeme; existing.geckoPair = existing.geckoPair || p.geckoPair; }
+          else { known.set(tokenKey(p.chain, p.mint), p); tokens.push(p); }
+        }
+      } catch (e) {
+        setStatus(describeError(e, "loading four.meme feed") + " Continuing without it…", "warn", true);
+        await sleep(800);
+      }
+    }
+    // Scans focused on young coins (max age <= 48h) pull the deeper feeds:
+    // several pages of minutes-old pools plus the transaction-count leaders —
+    // the "crowd arriving but still early" slice that latest-feeds (too new)
+    // and trending (already won) both miss
+    if (!usedFallback && (parseFloat($("maxAge").value) || Infinity) <= 48) {
+      setStatus("Adding fresh + high-traction pools…", "", true);
+      const known = new Set(tokens.map((t) => tokenKey(t.chain, t.mint)));
+      const merge = (list) => {
+        for (const f of list) {
+          const k = tokenKey(f.chain, f.mint);
+          if (known.has(k)) continue;
+          known.add(k);
+          tokens.push(f);
+        }
+      };
+      try { merge(await discoverFreshPools(3)); }
+      catch (e) { setStatus(describeError(e, "loading new pools") + " Continuing…", "warn", true); await sleep(800); }
+      try { merge(await discoverTraction()); }
+      catch (e) { setStatus(describeError(e, "loading traction pools") + " Continuing…", "warn", true); await sleep(800); }
+    }
+    // Recovery-style scans (max age > 48h) also pull established coins —
+    // the latest feeds only contain fresh launches, so without this pool an
+    // older-age window would return the same coins as an early hunt
+    if (!usedFallback && (parseFloat($("maxAge").value) || 0) > 48) {
+      setStatus("Adding established coins (GeckoTerminal trending + top volume)…", "", true);
+      try {
+        const est = await discoverEstablished();
+        const known = new Set(tokens.map((t) => tokenKey(t.chain, t.mint)));
+        for (const e of est) {
+          if (known.has(tokenKey(e.chain, e.mint))) continue;
+          known.add(tokenKey(e.chain, e.mint));
+          tokens.push(e);
+        }
+      } catch (e) {
+        setStatus(describeError(e, "loading established coins") + " Continuing without them…", "warn", true);
+        await sleep(800);
+      }
+    }
+    setFunnel(tokens.length, null, null, null);
+    if (tokens.length === 0) {
+      setStatus("No Solana tokens in the latest DexScreener feed right now. Try again shortly.", "warn");
+      return;
+    }
+
+    // 2. Market data
+    let withPairs;
+    if (usedFallback) {
+      withPairs = tokens; // fallback source already includes pool data
+    } else {
+      setStatus("Fetched " + tokens.length + " tokens. Loading market data…", "", true);
+      const market = await fetchMarketData(tokens);
+      withPairs = tokens
+        .map((t) => ({ ...t, pair: market.get(tokenKey(t.chain, t.mint)) || t.geckoPair }))
+        .filter((t) => t.pair);
+      // tokens without a profiles-feed entry still get lore signals from
+      // the pair listing's social/branding info
+      for (const t of withPairs) if (!t.profile && t.pair.infoProfile) t.profile = t.pair.infoProfile;
+    }
+    setFunnel(tokens.length, withPairs.length, null, null);
+    renderMetaRadar(detectNarratives(withPairs));
+    detectDupes(withPairs);
+
+    // On-chain curve validation for pump.fun tokens (one batched RPC call)
+    const curveToks = withPairs.filter((t) => t.pumpfun && t.curveAddress);
+    if (curveToks.length) {
+      setStatus("Validating " + curveToks.length + " pump.fun curves on-chain…", "", true);
+      try {
+        await fetchPumpCurves(curveToks);
+      } catch (e) {
+        setStatus(describeError(e, "reading bonding curves") + " Continuing without curve validation…", "warn", true);
+        await sleep(800);
+      }
+    }
+
+    // 3. Filters
+    const minLiq = parseFloat($("minLiq").value) || 0;
+    const minVol = parseFloat($("minVol").value) || 0;
+    const maxAgeH = parseFloat($("maxAge").value) || Infinity;
+    const minMcap = parseFloat($("minMcap").value) || 0;
+    const maxMcapRaw = parseFloat($("maxMcap").value);
+    const maxMcap = !isFinite(maxMcapRaw) || maxMcapRaw <= 0 ? Infinity : maxMcapRaw;
+    const now = Date.now();
+    let filtered = withPairs.filter((t) => {
+      const ageH = t.pair.createdAt ? (now - t.pair.createdAt) / 3.6e6 : Infinity;
+      const mcap = t.pair.marketCap != null ? t.pair.marketCap : (t.pair.fdv != null ? t.pair.fdv : 0);
+      // Bonding-curve coins live at a different scale (curve holds $1K-$6K,
+      // FDV < ~$70K until graduation) — min liquidity/mcap floors would
+      // structurally exclude all of them, so only volume/age/max-mcap apply.
+      const bonding = (t.pumpfun || t.fourmeme) && (t.curve ? !t.curve.complete : t.pair.liquidity < 10000);
+      if (bonding) return t.pair.volume24 >= minVol && ageH <= maxAgeH && mcap <= maxMcap;
+      return t.pair.liquidity >= minLiq && t.pair.volume24 >= minVol && ageH <= maxAgeH &&
+        mcap >= minMcap && mcap <= maxMcap;
+    });
+    const sortBy = $("sortBy").value;
+    for (const t of filtered) {
+      t.heat = heatScore(t.pair, t.boosted);
+      t.trend = trendAssess(t);
+      t.lore = loreAssess(t);
+    }
+    if (sortBy === "heat") filtered.sort((a, b) => b.heat - a.heat);
+    else if (sortBy === "trend" || sortBy === "grade") filtered.sort((a, b) => (b.trend.score || 0) - (a.trend.score || 0));
+    // grade sort starts as a trend sort — grades need the security/research
+    // results, so the list re-ranks itself once all checks are done
+    else if (sortBy === "lore") filtered.sort((a, b) => (b.lore.score || 0) - (a.lore.score || 0));
+    else if (sortBy === "gap") filtered.sort((a, b) => (gapScore(b) ?? -999) - (gapScore(a) ?? -999));
+    else if (sortBy === "newest") filtered.sort((a, b) => (b.pair.createdAt || 0) - (a.pair.createdAt || 0));
+    else filtered.sort((a, b) => b.pair.volume24 - a.pair.volume24);
+    let truncated = 0;
+    if (filtered.length > MAX_RUGCHECKS) {
+      truncated = filtered.length - MAX_RUGCHECKS;
+      filtered = filtered.slice(0, MAX_RUGCHECKS);
+    }
+    setFunnel(tokens.length, withPairs.length, filtered.length + truncated, null);
+
+    if (filtered.length === 0) {
+      setStatus("No tokens met the filters (liq ≥ " + fmtUsd(minLiq) + ", vol ≥ " + fmtUsd(minVol) + ", age ≤ " + maxAgeH + "h, mcap " + fmtUsd(minMcap) + "–" + (maxMcap === Infinity ? "∞" : fmtUsd(maxMcap)) + "). Loosen them and re-scan.", "warn");
+      return;
+    }
+
+    // 4. Render pending cards, then RugCheck sequentially
+    for (const t of filtered) t.verdict = "pending";
+    resultsEl.innerHTML = filtered.map(tokenCard).join("");
+
+    // Route security checks by chain: Solana → RugCheck (sequential, paced);
+    // GoPlus-supported chains → one batched call per chunk; others → UNKNOWN.
+    let passed = 0, done = 0;
+    const finish = (t) => {
+      if (t.verdict === "pass") passed++;
+      rerenderCard(t, resultsEl);
+      done++;
+      setFunnel(tokens.length, withPairs.length, filtered.length + truncated, passed);
+    };
+    const solanaTokens = filtered.filter((t) => t.chain === "solana");
+    const goplusByChain = new Map();
+    for (const t of filtered) {
+      if (t.chain === "solana") continue;
+      if (CHAIN_INFO[t.chain]) {
+        if (!goplusByChain.has(t.chain)) goplusByChain.set(t.chain, []);
+        goplusByChain.get(t.chain).push(t);
+      } else {
+        t.verdict = "unknown";
+        t.checkError = 'No free security checker available for chain "' + t.chain + '" — verify manually.';
+        finish(t);
+      }
+    }
+    for (const [chain, list] of goplusByChain) {
+      for (let i = 0; i < list.length; i += 20) {
+        const chunk = list.slice(i, i + 20);
+        setStatus("GoPlus check (" + chain + "): " + chunk.length + " tokens…", "", true);
+        try {
+          await goplusCheckChunk(chain, chunk);
+        } catch (e) {
+          for (const t of chunk) {
+            t.verdict = "unknown";
+            t.checkError = describeError(e, "checking " + t.pair.symbol);
+          }
+        }
+        chunk.forEach(finish);
+        await sleep(400);
+      }
+    }
+    for (let i = 0; i < solanaTokens.length; i++) {
+      const t = solanaTokens[i];
+      setStatus("RugCheck " + (i + 1) + "/" + solanaTokens.length + ": " + t.pair.symbol + "…" +
+        (truncated ? " (checking top " + MAX_RUGCHECKS + " by current sort; " + truncated + " more met filters)" : ""), "", true);
+      try {
+        const r = await rugcheckToken(t.mint);
+        t.verdict = r.verdict;
+        t.risks = r.risks;
+        t.score = r.score;
+      } catch (e) {
+        t.verdict = "unknown";
+        t.checkError = describeError(e, "checking " + t.pair.symbol);
+      }
+      finish(t);
+      if (i + 1 < solanaTokens.length) await sleep(RUGCHECK_DELAY_MS);
+    }
+
+    // Deep research on the tokens that cleared the rug check
+    const toResearch = filtered.filter((t) => t.verdict === "pass");
+    for (let i = 0; i < toResearch.length; i++) {
+      const t = toResearch[i];
+      setStatus("Deep research " + (i + 1) + "/" + toResearch.length + ": " + t.pair.symbol + " (holders, LP lock, insiders)…", "", true);
+      await researchToken(t);
+      rerenderCard(t, resultsEl);
+      // only RugCheck report calls need pacing; EVM research reads cached GoPlus data
+      if (t.chain === "solana" && i + 1 < toResearch.length) await sleep(RUGCHECK_DELAY_MS);
+    }
+
+    // Final pass now that every signal is in: re-rank by grade, then apply
+    // strict mode (A/B evidence bar) to what stays visible
+    if (sortBy === "grade") {
+      filtered.sort((a, b) => {
+        const ga = gradeAssess(a), gb = gradeAssess(b);
+        return (gb ? gb.score : -1) - (ga ? ga.score : -1);
+      });
+    }
+    let hidden = 0;
+    let visible = filtered;
+    if ($("strictMode").checked) {
+      visible = filtered.filter((t) => {
+        const g = gradeAssess(t);
+        return g && (g.tier === "A" || g.tier === "B");
+      });
+      hidden = filtered.length - visible.length;
+    }
+    resultsEl.innerHTML = visible.length
+      ? visible.map(tokenCard).join("")
+      : '<div class="card empty-strict">Nothing met the strict evidence bar this scan (grade A or B). ' +
+        'That is the filter doing its job — no coin today had clean security, strong holder research, and real exit depth all at once. ' +
+        'An empty list is information, not malfunction.</div>';
+
+    const cautions = filtered.filter((t) => t.verdict === "caution").length;
+    const fails = filtered.filter((t) => t.verdict === "fail").length;
+    const setups = filtered.filter(isSetup).length;
+    setStatus("Done" + (usedFallback ? " (via GeckoTerminal fallback)" : "") + ": " +
+      passed + " passed, " + cautions + " caution, " + fails + " failed" +
+      (hidden ? " — strict mode: " + visible.length + " shown, " + hidden + " hidden below the A/B bar" : "") +
+      (setups ? " — ⭐ " + setups + " match the early-hunt profile" : "") +
+      ((() => { const n = filtered.filter(isRebound).length; return n ? " — ↩ " + n + " show the rebound shape" : ""; })()) +
+      (truncated ? " — top " + MAX_RUGCHECKS + " by current sort checked, " + truncated + " more met filters" : "") + ".");
+  } catch (e) {
+    setStatus(describeError(e, "scanning"), "error");
+  } finally {
+    scanning = false;
+    $("scanBtn").disabled = false;
+  }
+}
+
+/* ---------- single token check ---------- */
+
+async function checkSingle() {
+  const mint = $("mintInput").value.trim();
+  const isEvm = /^0x[0-9a-fA-F]{40}$/.test(mint);
+  const isBase58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint);
+  if (!isEvm && !isBase58) {
+    setStatus("That doesn't look like a token address (0x… for EVM chains, base58 for Solana).", "error");
+    return;
+  }
+  $("checkBtn").disabled = true;
+  try {
+    setStatus("Looking up " + mint.slice(0, 10) + "… across chains…", "", true);
+    let pair = null;
+    try {
+      // Chain-agnostic lookup: returns this token's pairs on every chain
+      const data = await fetchJson("https://api.dexscreener.com/latest/dex/tokens/" + mint, "DexScreener");
+      let best = null;
+      for (const p of (data && data.pairs) || []) {
+        if (!p.baseToken || p.baseToken.address.toLowerCase() !== mint.toLowerCase()) continue;
+        const liq = (p.liquidity && p.liquidity.usd) || 0;
+        if (!best || liq > ((best.liquidity && best.liquidity.usd) || 0)) best = p;
+      }
+      if (best) pair = pairFromDex(best, best.chainId);
+    } catch (e) {
+      setStatus(describeError(e, "loading market data") + " Continuing with security check only…", "warn", true);
+    }
+    const chain = pair ? pair.chain : (isBase58 ? "solana" : null);
+    if (!chain) {
+      setStatus("No live pair found for that address on any chain, so the chain can't be detected — EVM security check needs a live pair.", "error");
+      return;
+    }
+    const t = {
+      mint,
+      chain,
+      boosted: false,
+      verdict: "pending",
+      pair: pair || {
+        chain, symbol: mint.slice(0, 6) + "…", name: "(no live DexScreener pair found)",
+        icon: null, liquidity: NaN, volume24: NaN, marketCap: null, fdv: null,
+        createdAt: null, url: "https://dexscreener.com/" + chain + "/" + mint,
+      },
+    };
+    singleEl.innerHTML = '<div class="section-title">Single token check</div>' + tokenCard(t);
+    setStatus("Running " + (chain === "solana" ? "RugCheck" : "GoPlus") + " on " + t.pair.symbol + " (" + chain + ")…", "", true);
+    await securityCheckOne(t);
+    if (t.verdict === "pass" || t.verdict === "caution") {
+      setStatus("Deep research on " + t.pair.symbol + " (holders, LP lock, insiders)…", "", true);
+      await researchToken(t);
+    }
+    rerenderCard(t, singleEl);
+    document.querySelector('#singleResult .card').classList.add("open");
+    const badge = VERDICT_BADGE[t.verdict];
+    setStatus("Single check done: " + t.pair.symbol + " (" + chain + ") → " + badge.text.replace(/^\S+\s/, ""), t.verdict === "fail" ? "error" : t.verdict === "caution" ? "warn" : "");
+  } finally {
+    $("checkBtn").disabled = false;
+  }
+}
+
+$("scanBtn").addEventListener("click", () => { fillBlanks(); saveSettings(); runScan(); });
+/* ---------- sticky settings: filters persist, presets remember your edits ---------- */
+
+const SETTINGS_KEY = "launch-screener-settings-v1";
+const FIELD_IDS = ["minLiq", "minVol", "maxAge", "minMcap", "maxMcap", "sortBy"];
+const CHECK_IDS = ["pumpFeed", "strictMode"];
+// Templates apply only the FIRST time a mode is used — after that, each mode
+// remembers whatever you last set while in it and never reverts your values.
+// A field left BLANK snaps back to its mode's template value at scan time
+// (scan mode's blank max-mcap means "no limit" and stays blank by design).
+const MODE_TEMPLATES = {
+  scan:     { minLiq: 10000, minVol: 10000, maxAge: 72,  minMcap: 0,      maxMcap: "",      sortBy: "grade" },
+  early:    { minLiq: 5000,  minVol: 5000,  maxAge: 24,  minMcap: 20000,  maxMcap: 1000000, sortBy: "grade" },
+  recovery: { minLiq: 10000, minVol: 10000, maxAge: 168, minMcap: 300000, maxMcap: 1000000, sortBy: "grade" },
+  fresh:    { minLiq: 1000,  minVol: 1000,  maxAge: 1,   minMcap: 0,      maxMcap: 500000,  sortBy: "newest" },
+};
+
+function fillBlanks() {
+  const tpl = MODE_TEMPLATES[currentMode] || MODE_TEMPLATES.scan;
+  for (const id of FIELD_IDS) {
+    const el = $(id);
+    if (String(el.value).trim() === "" && tpl[id] !== "" && tpl[id] != null) el.value = tpl[id];
+  }
+}
+let currentMode = "scan";
+
+function loadSettings() {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch (e) { return {}; }
+}
+function saveSettings() {
+  const s = loadSettings();
+  s.modes = s.modes || {};
+  s.modes[currentMode] = Object.fromEntries(FIELD_IDS.map((id) => [id, $(id).value]));
+  s.checks = Object.fromEntries(CHECK_IDS.map((id) => [id, $(id).checked]));
+  s.lastMode = currentMode;
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) { /* private browsing */ }
+}
+function applyValues(vals) {
+  if (!vals) return;
+  for (const id of FIELD_IDS) if (vals[id] != null) $(id).value = vals[id];
+}
+function enterMode(mode) {
+  currentMode = mode;
+  const s = loadSettings();
+  applyValues((s.modes && s.modes[mode]) || MODE_TEMPLATES[mode]);
+  fillBlanks();
+  saveSettings();
+}
+// restore last session's values on load
+(function restoreSettings() {
+  const s = loadSettings();
+  currentMode = s.lastMode || "scan";
+  if (s.modes && s.modes[currentMode]) applyValues(s.modes[currentMode]);
+  if (s.checks) for (const id of CHECK_IDS) if (s.checks[id] != null) $(id).checked = s.checks[id];
+})();
+for (const id of FIELD_IDS.concat(CHECK_IDS)) $(id).addEventListener("change", () => { fillBlanks(); saveSettings(); });
+// X proxy URL persists separately (global, never in the repo)
+try { $("xProxy").value = localStorage.getItem("x-proxy-url") || ""; } catch (e) {}
+$("xProxy").addEventListener("change", () => {
+  try { localStorage.setItem("x-proxy-url", $("xProxy").value.trim()); } catch (e) {}
+});
+
+$("recoveryBtn").addEventListener("click", () => { enterMode("recovery"); runScan(); });
+$("huntBtn").addEventListener("click", () => { enterMode("early"); runScan(); });
+$("freshBtn").addEventListener("click", () => { enterMode("fresh"); runScan(); });
+$("checkBtn").addEventListener("click", checkSingle);
+$("mintInput").addEventListener("keydown", (e) => { if (e.key === "Enter") checkSingle(); });
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+// Cloudflare Workers config — lets Cloudflare's GitHub integration deploy
+// x-proxy-worker.js directly from this repo (Compute -> Create -> Import a
+// repository). The TWITTERAPI_KEY secret is still added in the Cloudflare
+// dashboard, never in this repo.
+{
+  "name": "x-proxy",
+  "main": "x-proxy-worker.js",
+  "compatibility_date": "2026-01-01"
+}
