@@ -406,6 +406,7 @@
   <button class="secondary" id="huntBtn" title="Early-launch mode: fills sensible defaults the first time (micro-cap, under 24h), then remembers whatever filters you set while in this mode — your edits never revert. No preset predicts winners.">🎯 Early hunt</button>
   <button class="secondary" id="recoveryBtn" title="Recovery mode: fills sensible defaults the first time ($300K-$1M, up to 7 days, established coins included), then remembers whatever filters you set while in this mode — your edits never revert. Rebound-shape coins get a badge; the shape is not a probability.">🔄 Recovery</button>
   <button class="secondary" id="freshBtn" title="Fresh mode: pools minutes-to-an-hour old from the new-pools feeds, mcap-capped at $500K so anything that already ran is excluded, sorted newest first. Maximum rug density, minimum data — verdicts are often UNKNOWN this early, and strict mode will hide most results. That is the protection working, not failing.">🆕 Fresh</button>
+  <button class="secondary" id="logBtn" title="The outcome log: every A/B-grade coin a scan has shown you, with what its market cap did since — including the dead ones. Review this before trusting any single scan.">📓 Log</button>
   <label class="chk" title="Include launchpad bonding-curve tokens: pump.fun (Solana) and four.meme (BSC), plus the freshest BSC pools. Curve coins are judged at curve scale: min liquidity/mcap floors don't apply to them, since curves hold only $1K-$6K by design."><input type="checkbox" id="pumpFeed" checked> Launchpads (pump.fun + four.meme)</label>
   <label class="chk" title="After all checks finish, only keep coins graded A or B: PASS verdict, strong holder/LP research, real exit depth, validated traction. Most scans will show few or none — an empty list means nothing met the evidence bar, which is the protection working."><input type="checkbox" id="strictMode" checked> Strict mode</label>
 </div>
@@ -1165,6 +1166,7 @@ function gradeAssess(t) {
   let capTier = 100;
   if (t.verdict === "unknown") capTier = 59;
   if (t.dupeOf) capTier = Math.min(capTier, 59);
+  if (t.serialRisk) capTier = Math.min(capTier, 59);
   // young coin with unlocked/unverified LP: the deployer can pull the pool at
   // any moment — a clean contract doesn't matter when the rug lever is the LP
   // itself (established coins are exempt; V3-era liquidity is rarely locked)
@@ -1446,6 +1448,12 @@ async function researchToken(t) {
       const insiders = d.graphInsidersDetected || 0;
       pts.push({ ok: insiders === 0, text: insiders === 0 ? "no insider wallet networks detected"
         : insiders + " insider wallets in " + (d.insiderNetworks || []).length + " network(s) — supply may be coordinated" });
+      // serial-deployer check: creator wallet's other launches — factory
+      // scammers deploy dozens; a first-timer or small count is normal
+      const priorTokens = Array.isArray(d.creatorTokens) ? d.creatorTokens.length : 0;
+      pts.push({ ok: priorTokens <= 3, text: priorTokens === 0 ? "first token from this creator wallet"
+        : "creator wallet launched " + priorTokens + " other token(s)" + (priorTokens >= 5 ? " — serial deployer, classic factory pattern" : "") });
+      if (priorTokens >= 5) t.serialRisk = true;
       if (d.rugged) pts.push({ ok: false, text: "RugCheck marks this token as RUGGED" });
       if (t.holders == null && holders != null) t.holders = holders;
       t.research = pts;
@@ -1512,6 +1520,11 @@ async function researchToken(t) {
 async function xBuzz(mint) {
   const base = ((localStorage.getItem("x-proxy-url") || "").trim()).replace(/\/+$/, "");
   if (!base) return null;
+  // cache lookups for an hour so repeat scans do not re-spend credits
+  let cache = {};
+  try { cache = JSON.parse(localStorage.getItem("x-cache-v1")) || {}; } catch (e) {}
+  const hit = cache[mint];
+  if (hit && Date.now() - hit.t < 3600e3) return hit.data;
   let res;
   try {
     res = await fetch(base + "/?q=" + encodeURIComponent(mint));
@@ -1530,7 +1543,12 @@ async function xBuzz(mint) {
     topFollowers = Math.max(topFollowers, a.followers || 0);
     engagement += (t.likeCount || 0) + (t.retweetCount || 0) + (t.replyCount || 0);
   }
-  return { tweets: tweets.length, authors: authors.size, topFollowers, engagement };
+  const out = { tweets: tweets.length, authors: authors.size, topFollowers, engagement };
+  cache[mint] = { t: Date.now(), data: out };
+  const ks = Object.keys(cache);
+  if (ks.length > 200) { ks.sort((a, b) => cache[a].t - cache[b].t); for (const k of ks.slice(0, ks.length - 200)) delete cache[k]; }
+  try { localStorage.setItem("x-cache-v1", JSON.stringify(cache)); } catch (e) {}
+  return out;
 }
 
 // Single-token security check, routed by chain; mutates the token
@@ -1614,6 +1632,8 @@ function tokenCard(t) {
           (() => { const g = gapScore(t); return g == null ? "" :
             '<span title="Attention (trend+lore) minus priced-in (mcap tier + 24h run). Positive = attention not yet priced in. A present-tense reading, not a prediction.">Gap <b>' + (g > 0 ? "+" : "") + g + '</b></span>'; })() +
           (t.xBuzz ? '<span>𝕏 <b>' + t.xBuzz.authors + '</b></span>' : "") +
+          (t.hist ? '<span title="Seen in ' + t.hist.count + ' scans over ' + fmtAge(t.hist.hours) + ' — surviving across scans with a real grade is rarer than any single-scan signal">⏱ <b>' + t.hist.count + '×/' + fmtAge(t.hist.hours) + '</b></span>' : "") +
+          (t.hist && Math.abs(t.hist.trendDelta) >= 10 ? '<span title="Trend change since the previous scan — rising means the crowd is arriving between your scans">Δscan <b class="' + (t.hist.trendDelta > 0 ? "up" : "down") + '">' + (t.hist.trendDelta > 0 ? "+" : "") + t.hist.trendDelta + ' trend</b></span>' : "") +
           (t.narrative ? '<span>Meta <b>' + esc(t.narrative) + '</b></span>' : "") +
           (() => { const p = PHASE_BADGE[(t.runway || (t.runway = runwayAssess(t.pair))).phase];
                    return '<span class="phase ' + p.cls + '">' + p.text + '</span>'; })() +
@@ -1986,6 +2006,7 @@ async function runScan() {
       });
       hidden = filtered.length - visible.length;
     }
+    recordScan(filtered, visible); // memory: attaches cross-scan signals + logs shown coins
     resultsEl.innerHTML = visible.length
       ? visible.map(tokenCard).join("")
       : '<div class="card empty-strict">Nothing met the strict evidence bar this scan (grade A or B). ' +
@@ -2073,6 +2094,98 @@ async function checkSingle() {
 }
 
 $("scanBtn").addEventListener("click", () => { fillBlanks(); saveSettings(); runScan(); });
+/* ---------- scan memory: survival, deltas, and the outcome log ---------- */
+
+// Every scan records what it saw (in this browser only). Two signals come
+// from memory that no single scan can produce: SURVIVAL (a coin holding its
+// grade across scans over hours — most rugs never live that long) and DELTA
+// (trend rising between scans = crowd arriving, measured not inferred). The
+// log keeps every strict-mode survivor shown, so outcomes can be reviewed
+// honestly later — including the ones that died.
+const HISTORY_KEY = "screener-history-v1";
+function loadHistory() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || { tokens: {}, log: [] }; }
+  catch (e) { return { tokens: {}, log: [] }; }
+}
+function saveHistory(h) {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(h)); } catch (e) { /* storage full/blocked */ }
+}
+function recordScan(filtered, visible) {
+  const h = loadHistory();
+  const now = Date.now();
+  for (const t of filtered) {
+    const key = tokenKey(t.chain, t.mint);
+    const rec = h.tokens[key] || (h.tokens[key] = { sym: t.pair.symbol, first: now, obs: [] });
+    rec.sym = t.pair.symbol;
+    rec.last = now;
+    const g = gradeAssess(t);
+    rec.obs.push({ t: now, tier: g ? g.tier : "-", trend: (t.trend && t.trend.score) || 0, mcap: t.pair.marketCap != null ? t.pair.marketCap : (t.pair.fdv || 0) });
+    if (rec.obs.length > 12) rec.obs = rec.obs.slice(-12);
+    if (rec.obs.length >= 2) {
+      const prev = rec.obs[rec.obs.length - 2];
+      t.hist = {
+        count: rec.obs.length,
+        hours: (now - rec.first) / 3.6e6,
+        trendDelta: rec.obs[rec.obs.length - 1].trend - prev.trend,
+        prevTier: prev.tier,
+      };
+    }
+  }
+  // the outcome log tracks A/B-grade coins only — the ones the evidence bar
+  // endorsed — whether or not strict mode was hiding the rest
+  for (const t of filtered) {
+    const g = gradeAssess(t);
+    if (!g || (g.tier !== "A" && g.tier !== "B")) continue;
+    h.log.push({ t: now, key: tokenKey(t.chain, t.mint), sym: t.pair.symbol, chain: t.chain, mint: t.mint, tier: g.tier, mcap: t.pair.marketCap != null ? t.pair.marketCap : (t.pair.fdv || 0) });
+  }
+  if (h.log.length > 200) h.log = h.log.slice(-200);
+  const keys = Object.keys(h.tokens);
+  if (keys.length > 500) {
+    keys.sort((a, b) => (h.tokens[a].last || 0) - (h.tokens[b].last || 0));
+    for (const k of keys.slice(0, keys.length - 500)) delete h.tokens[k];
+  }
+  saveHistory(h);
+}
+
+// The outcome mirror: every A/B coin the screener ever showed, with what its
+// market cap did since. This is the honest scoreboard — the dead ones count.
+async function renderLog() {
+  if (scanning) return;
+  const h = loadHistory();
+  if (!h.log.length) {
+    resultsEl.innerHTML = '<div class="card empty-strict">No shown coins logged yet — the log records every A/B-grade coin a scan shows you, then tracks what happened to it. Run scans and come back.</div>';
+    return;
+  }
+  setStatus("Loading outcomes for your logged coins…", "", true);
+  const latest = new Map();
+  for (const e of h.log) latest.set(e.key, e); // newest entry per coin wins
+  const entries = [...latest.values()].sort((a, b) => b.t - a.t).slice(0, 30);
+  let market = new Map();
+  try { market = await fetchMarketData(entries.map((e) => ({ chain: e.chain, mint: e.mint }))); }
+  catch (err) { /* render with stale data */ }
+  const now = Date.now();
+  let up = 0, down = 0, dead = 0;
+  const rows = entries.map((e) => {
+    const pair = market.get(tokenKey(e.chain, e.mint));
+    const nowCap = pair ? (pair.marketCap != null ? pair.marketCap : pair.fdv) : null;
+    let outcome, cls;
+    if (!pair || !(nowCap > 0)) { outcome = "no live pair — dead or delisted"; cls = "down"; dead++; }
+    else {
+      const pct = e.mcap > 0 ? 100 * (nowCap - e.mcap) / e.mcap : 0;
+      cls = pct >= 0 ? "up" : "down";
+      if (pct >= 0) up++; else down++;
+      outcome = fmtUsd(e.mcap) + " → " + fmtUsd(nowCap) + " (" + (pct >= 0 ? "+" : "") + pct.toFixed(0) + "%)";
+    }
+    return '<div class="card"><div class="card-head" style="cursor:default">' +
+      '<div class="tok-id"><div class="tok-name"><div class="sym">' + esc(e.sym) + ' <span class="chain-chip">' + esc(e.chain) + '</span></div>' +
+      '<div class="nm">shown ' + fmtAge((now - e.t) / 3.6e6) + ' ago at grade ' + esc(e.tier) + '</div></div></div>' +
+      '<span class="metrics"><b class="' + cls + '">' + outcome + '</b></span>' +
+      '</div></div>';
+  }).join("");
+  resultsEl.innerHTML = '<div class="section-title">Outcome log — every A/B coin shown (' + up + ' up · ' + down + ' down · ' + dead + ' dead)</div>' + rows;
+  setStatus("Outcome log: " + entries.length + " logged coins. This is the honest scoreboard — review it before trusting any single scan.");
+}
+
 /* ---------- sticky settings: filters persist, presets remember your edits ---------- */
 
 const SETTINGS_KEY = "launch-screener-settings-v1";
@@ -2137,6 +2250,7 @@ $("xProxy").addEventListener("change", () => {
 $("recoveryBtn").addEventListener("click", () => { enterMode("recovery"); runScan(); });
 $("huntBtn").addEventListener("click", () => { enterMode("early"); runScan(); });
 $("freshBtn").addEventListener("click", () => { enterMode("fresh"); runScan(); });
+$("logBtn").addEventListener("click", () => { renderLog(); });
 $("checkBtn").addEventListener("click", checkSingle);
 $("mintInput").addEventListener("keydown", (e) => { if (e.key === "Enter") checkSingle(); });
 </script>
