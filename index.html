@@ -35,7 +35,7 @@
   /* Funnel stat tiles */
   .funnel {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 8px;
     margin-bottom: 14px;
   }
@@ -84,6 +84,16 @@
     flex: 0 0 auto;
   }
   .chk input { accent-color: var(--accent); }
+  .adv { flex: 1 1 100%; order: 10; }
+  .adv summary {
+    font-size: 0.72rem;
+    color: var(--muted);
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+  }
+  .adv summary:hover { color: var(--ink-2); }
+  .adv .field { max-width: 420px; }
   .pump-chip { color: var(--good); border-color: var(--good); }
   .chain-chip {
     font-size: 0.62rem;
@@ -187,6 +197,21 @@
   }
   #status.error { color: var(--crit); border-color: var(--crit); }
   #status.warn { color: var(--warn); }
+  #status { flex-wrap: wrap; }
+  .pbar {
+    flex: 1 0 100%;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .pbar i {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s;
+  }
   .spinner {
     width: 12px; height: 12px;
     border: 2px solid var(--border);
@@ -334,6 +359,7 @@
   <div class="tile"><div class="label">Live pairs</div><div class="value" id="f-live">&ndash;</div></div>
   <div class="tile"><div class="label">Met filters</div><div class="value" id="f-filtered">&ndash;</div></div>
   <div class="tile"><div class="label">Passed</div><div class="value" id="f-passed">&ndash;</div></div>
+  <div class="tile"><div class="label">Shown</div><div class="value" id="f-shown">&ndash;</div></div>
 </div>
 
 <div class="controls">
@@ -369,10 +395,13 @@
       <option value="newest">Newest</option>
     </select>
   </div>
-  <div class="field" style="flex: 2 1 220px;">
-    <label for="xProxy" title="Optional: URL of your own Cloudflare Worker proxy for twitterapi.io (see x-proxy-worker.js in the repo). Your API key lives in the worker, never in this page. When set, researched coins get an 𝕏-mentions check.">𝕏 proxy URL (optional)</label>
-    <input type="text" id="xProxy" placeholder="https://x-proxy.you.workers.dev" spellcheck="false">
-  </div>
+  <details class="adv">
+    <summary>⚙ Advanced</summary>
+    <div class="field" style="margin-top: 8px;">
+      <label for="xProxy" title="Optional: URL of your own Cloudflare Worker proxy for twitterapi.io (see x-proxy-worker.js in the repo). Your API key lives in the worker, never in this page. When set, researched coins get an 𝕏-mentions check.">𝕏 proxy URL (optional)</label>
+      <input type="text" id="xProxy" placeholder="https://x-proxy.you.workers.dev" spellcheck="false">
+    </div>
+  </details>
   <button id="scanBtn">Scan</button>
   <button class="secondary" id="huntBtn" title="Early-launch mode: fills sensible defaults the first time (micro-cap, under 24h), then remembers whatever filters you set while in this mode — your edits never revert. No preset predicts winners.">🎯 Early hunt</button>
   <button class="secondary" id="recoveryBtn" title="Recovery mode: fills sensible defaults the first time ($300K-$1M, up to 7 days, established coins included), then remembers whatever filters you set while in this mode — your edits never revert. Rebound-shape coins get a badge; the shape is not a probability.">🔄 Recovery</button>
@@ -449,10 +478,11 @@ function describeError(e, context) {
   return "Unexpected error" + (context ? " while " + context : "") + ": " + e.message;
 }
 
-function setStatus(msg, cls, busy) {
+function setStatus(msg, cls, busy, frac) {
   statusEl.className = cls || "";
-  statusEl.innerHTML = (busy ? '<span class="spinner"></span>' : "") + "<span></span>";
-  statusEl.lastChild.textContent = msg;
+  statusEl.innerHTML = (busy ? '<span class="spinner"></span>' : "") + "<span></span>" +
+    (frac != null ? '<span class="pbar"><i style="width:' + Math.round(100 * Math.max(0, Math.min(1, frac))) + '%"></i></span>' : "");
+  statusEl.querySelector("span:not(.spinner):not(.pbar)").textContent = msg;
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1015,7 +1045,7 @@ function loreAssess(t) {
 // Narrative radar: discover the scan's live metas from the data itself —
 // terms shared by 3+ coins' symbols/names/stories, ranked by combined volume.
 // Self-updating as metas rotate; no hardcoded narrative list to go stale.
-const NARRATIVE_STOPWORDS = new Set(("the and for with this that from your you are was were have has will all not but its can our out now new just more than into only one who what when where why how made make get got token coin meme memecoin crypto chain sol solana bsc eth base pump fun launch official community world most every people time like dont don yes his her they them lol very first best good big about were street usdt usdc busd dai wsol wbnb weth wrapped straight built fees holders supply contract renounced locked burned liquidity dev buy sell tax stealth fair").split(" "));
+const NARRATIVE_STOPWORDS = new Set(("the and for with this that from your you are was were have has will all not but its can our out now new just more than into only one who what when where why how made make get got token coin meme memecoin crypto chain sol solana bsc eth base pump fun launch official community world most every people time like dont don yes his her they them lol very first best good big about were street usdt usdc busd dai wsol wbnb weth wrapped straight built fees holders supply contract renounced locked burned liquidity dev buy sell tax stealth fair paired market cap trading").split(" "));
 
 function detectNarratives(tokens) {
   const termMap = new Map();
@@ -1693,11 +1723,12 @@ document.addEventListener("click", (e) => {
   if (head && !e.target.closest("a")) head.parentElement.classList.toggle("open");
 });
 
-function setFunnel(fetched, live, filtered, passed) {
+function setFunnel(fetched, live, filtered, passed, shown) {
   $("f-fetched").textContent = fetched == null ? "–" : fetched;
   $("f-live").textContent = live == null ? "–" : live;
   $("f-filtered").textContent = filtered == null ? "–" : filtered;
   $("f-passed").textContent = passed == null ? "–" : passed;
+  $("f-shown").textContent = shown == null ? "–" : shown;
 }
 
 /* ---------- main scan flow ---------- */
@@ -1897,7 +1928,7 @@ async function runScan() {
     for (const [chain, list] of goplusByChain) {
       for (let i = 0; i < list.length; i += 20) {
         const chunk = list.slice(i, i + 20);
-        setStatus("GoPlus check (" + chain + "): " + chunk.length + " tokens…", "", true);
+        setStatus("GoPlus check (" + chain + "): " + chunk.length + " tokens…", "", true, done / filtered.length);
         try {
           await goplusCheckChunk(chain, chunk);
         } catch (e) {
@@ -1913,7 +1944,7 @@ async function runScan() {
     for (let i = 0; i < solanaTokens.length; i++) {
       const t = solanaTokens[i];
       setStatus("RugCheck " + (i + 1) + "/" + solanaTokens.length + ": " + t.pair.symbol + "…" +
-        (truncated ? " (checking top " + MAX_RUGCHECKS + " by current sort; " + truncated + " more met filters)" : ""), "", true);
+        (truncated ? " (checking top " + MAX_RUGCHECKS + " by current sort; " + truncated + " more met filters)" : ""), "", true, done / filtered.length);
       try {
         const r = await rugcheckToken(t.mint);
         t.verdict = r.verdict;
@@ -1931,7 +1962,7 @@ async function runScan() {
     const toResearch = filtered.filter((t) => t.verdict === "pass");
     for (let i = 0; i < toResearch.length; i++) {
       const t = toResearch[i];
-      setStatus("Deep research " + (i + 1) + "/" + toResearch.length + ": " + t.pair.symbol + " (holders, LP lock, insiders)…", "", true);
+      setStatus("Deep research " + (i + 1) + "/" + toResearch.length + ": " + t.pair.symbol + " (holders, LP lock, insiders)…", "", true, i / toResearch.length);
       await researchToken(t);
       rerenderCard(t, resultsEl);
       // only RugCheck report calls need pacing; EVM research reads cached GoPlus data
@@ -1963,6 +1994,7 @@ async function runScan() {
     lastFiltered = filtered;
     lastVisible = visible;
     activeNarrative = null;
+    setFunnel(tokens.length, withPairs.length, filtered.length + truncated, passed, visible.length);
 
     const cautions = filtered.filter((t) => t.verdict === "caution").length;
     const fails = filtered.filter((t) => t.verdict === "fail").length;
