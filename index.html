@@ -305,7 +305,10 @@
     border: 1px solid var(--border);
     border-radius: 999px;
     padding: 3px 10px;
+    cursor: pointer;
   }
+  .radar-chip:hover { border-color: var(--accent); }
+  .radar-chip.active { border-color: var(--accent); color: var(--ink); background: rgba(122, 162, 247, 0.12); }
   .radar-chip b { color: var(--ink); }
   footer { color: var(--muted); font-size: 0.7rem; margin-top: 24px; text-align: center; }
   footer a { color: var(--muted); }
@@ -695,6 +698,31 @@ async function discoverFreshPools(pages) {
   return tokens;
 }
 
+// Robinhood Chain pools — the tokenized-stocks meta lives here. GeckoTerminal
+// indexes the network, so pull its newest + trending pools directly instead of
+// only catching the few that buy DexScreener profiles.
+async function discoverRobinhood() {
+  const tokens = [];
+  const seen = new Set();
+  const urls = [
+    "https://api.geckoterminal.com/api/v2/networks/robinhood/new_pools?page=1",
+    "https://api.geckoterminal.com/api/v2/networks/robinhood/trending_pools?page=1",
+  ];
+  for (let i = 0; i < urls.length; i++) {
+    if (i) await sleep(600);
+    let data;
+    try { data = await fetchJsonPaced(urls[i], "GeckoTerminal (robinhood)"); }
+    catch (e) { continue; }
+    for (const pool of (data && data.data) || []) {
+      const t = geckoPoolToToken(pool, "robinhood", "robinhood");
+      if (!t || seen.has(t.mint)) continue;
+      seen.add(t.mint);
+      tokens.push(t);
+    }
+  }
+  return tokens;
+}
+
 // High-traction pools: ranked by 24h TRANSACTION COUNT, not volume — trade
 // count measures crowd size and is much harder for one whale to fake. This is
 // the "gaining traction" middle that latest-feeds (too new) and trending
@@ -987,7 +1015,7 @@ function loreAssess(t) {
 // Narrative radar: discover the scan's live metas from the data itself —
 // terms shared by 3+ coins' symbols/names/stories, ranked by combined volume.
 // Self-updating as metas rotate; no hardcoded narrative list to go stale.
-const NARRATIVE_STOPWORDS = new Set(("the and for with this that from your you are was were have has will all not but its can our out now new just more than into only one who what when where why how made make get got token coin meme memecoin crypto chain sol solana bsc eth base pump fun launch official community world most every people time like dont don yes his her they them lol very first best good big about were street usdt usdc busd dai wsol wbnb weth wrapped").split(" "));
+const NARRATIVE_STOPWORDS = new Set(("the and for with this that from your you are was were have has will all not but its can our out now new just more than into only one who what when where why how made make get got token coin meme memecoin crypto chain sol solana bsc eth base pump fun launch official community world most every people time like dont don yes his her they them lol very first best good big about were street usdt usdc busd dai wsol wbnb weth wrapped straight built fees holders supply contract renounced locked burned liquidity dev buy sell tax stealth fair").split(" "));
 
 function detectNarratives(tokens) {
   const termMap = new Map();
@@ -1021,12 +1049,36 @@ function detectNarratives(tokens) {
 function renderMetaRadar(clusters) {
   const el = $("metaRadar");
   if (!clusters.length) { el.innerHTML = ""; return; }
-  el.innerHTML = '<div class="radar"><span class="radar-label">Narratives in this scan:</span>' +
+  el.innerHTML = '<div class="radar"><span class="radar-label">Narratives in this scan (tap to filter):</span>' +
     clusters.map((c) =>
-      '<span class="radar-chip" title="' + c.count + ' coins share this term — combined 24h volume ' + fmtUsd(c.vol) + '">' +
+      '<span class="radar-chip" data-term="' + esc(c.term) + '" title="' + c.count + ' coins share this term — combined 24h volume ' + fmtUsd(c.vol) + '. Tap to show every coin in this narrative, including ones strict mode hides.">' +
       (c.count >= 5 ? "🔥 " : "") + esc(c.term) + ' <b>×' + c.count + '</b></span>').join("") +
     '</div>';
 }
+
+// Tap a narrative chip to filter the list to that meta — deliberately searches
+// ALL graded coins, not just strict-mode survivors, so the hot narrative is
+// visible with honest grades attached rather than silently hidden.
+let lastFiltered = [];
+let lastVisible = [];
+let activeNarrative = null;
+document.addEventListener("click", (e) => {
+  const chip = e.target.closest(".radar-chip");
+  if (!chip || scanning) return;
+  const term = chip.dataset.term;
+  activeNarrative = activeNarrative === term ? null : term;
+  document.querySelectorAll(".radar-chip").forEach((c) => c.classList.toggle("active", c.dataset.term === activeNarrative));
+  if (!activeNarrative) {
+    resultsEl.innerHTML = lastVisible.map(tokenCard).join("");
+    return;
+  }
+  const matches = lastFiltered.filter((t) =>
+    ((t.pair.symbol || "") + " " + (t.pair.name || "") + " " + ((t.profile && t.profile.description) || ""))
+      .toLowerCase().includes(activeNarrative));
+  resultsEl.innerHTML = matches.length
+    ? matches.map(tokenCard).join("")
+    : '<div class="card empty-strict">No checked coins match this narrative — its coins may not have met your filters or the per-scan check cap.</div>';
+});
 
 // Gap score: the trader's "narrative strength vs how much is priced in".
 // attention (trend+lore) minus priced-in (mcap tier + how far price already
@@ -1714,6 +1766,8 @@ async function runScan() {
       catch (e) { setStatus(describeError(e, "loading new pools") + " Continuing…", "warn", true); await sleep(800); }
       try { merge(await discoverTraction()); }
       catch (e) { setStatus(describeError(e, "loading traction pools") + " Continuing…", "warn", true); await sleep(800); }
+      try { merge(await discoverRobinhood()); }
+      catch (e) { setStatus(describeError(e, "loading robinhood pools") + " Continuing…", "warn", true); await sleep(800); }
     }
     // Recovery-style scans (max age > 48h) also pull established coins —
     // the latest feeds only contain fresh launches, so without this pool an
@@ -1906,6 +1960,9 @@ async function runScan() {
       : '<div class="card empty-strict">Nothing met the strict evidence bar this scan (grade A or B). ' +
         'That is the filter doing its job — no coin today had clean security, strong holder research, and real exit depth all at once. ' +
         'An empty list is information, not malfunction.</div>';
+    lastFiltered = filtered;
+    lastVisible = visible;
+    activeNarrative = null;
 
     const cautions = filtered.filter((t) => t.verdict === "caution").length;
     const fails = filtered.filter((t) => t.verdict === "fail").length;
