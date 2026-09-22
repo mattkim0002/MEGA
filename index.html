@@ -1083,6 +1083,13 @@ function gradeAssess(t) {
   let capTier = 100;
   if (t.verdict === "unknown") capTier = 59;
   if (t.dupeOf) capTier = Math.min(capTier, 59);
+  // young coin with unlocked/unverified LP: the deployer can pull the pool at
+  // any moment — a clean contract doesn't matter when the rug lever is the LP
+  // itself (established coins are exempt; V3-era liquidity is rarely locked)
+  {
+    const ageH2 = t.pair.createdAt ? (Date.now() - t.pair.createdAt) / 3.6e6 : Infinity;
+    if (t.lpRisk && ageH2 < 72) capTier = Math.min(capTier, 59);
+  }
   if (!curveValidated) capTier = Math.min(capTier, 59);
   if (liq < 1000 || (cap > 0 && liq / cap < 0.02)) capTier = Math.min(capTier, 59);
   score = Math.min(Math.round(score), capTier);
@@ -1349,6 +1356,7 @@ async function researchToken(t) {
       let lpMax = 0;
       for (const m of d.markets || []) if (m.lp && m.lp.lpLockedPct != null) lpMax = Math.max(lpMax, m.lp.lpLockedPct);
       pts.push({ ok: lpMax >= 80, text: "LP " + lpMax.toFixed(0) + "% locked/burned (best market)" });
+      if (lpMax < 80) t.lpRisk = true;
       const creatorPct = (d.topHolders || [])
         .filter((h) => h.owner === d.creator || h.address === d.creator)
         .reduce((s, h) => s + (h.pct || 0), 0);
@@ -1369,6 +1377,7 @@ async function researchToken(t) {
       pts.push({ ok: top10 <= 30, text: "top 10 wallets hold " + top10.toFixed(1) + "% (contracts/locked excluded)" + (top10 > 30 ? " — concentrated" : "") });
       const lpLocked = 100 * (d.lp_holders || []).reduce((s, h) => s + (h.is_locked === 1 ? num(h.percent) : 0), 0);
       pts.push({ ok: lpLocked >= 50, text: "LP " + lpLocked.toFixed(0) + "% locked/burned" });
+      if (lpLocked < 50) t.lpRisk = true;
       const cPct = 100 * num(d.creator_percent);
       pts.push({ ok: cPct <= 5, text: "creator holds " + cPct.toFixed(1) + "% of supply" });
       if (d.owner_percent != null && d.owner_percent !== "") {
