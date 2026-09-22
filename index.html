@@ -366,6 +366,10 @@
       <option value="newest">Newest</option>
     </select>
   </div>
+  <div class="field" style="flex: 2 1 220px;">
+    <label for="xProxy" title="Optional: URL of your own Cloudflare Worker proxy for twitterapi.io (see x-proxy-worker.js in the repo). Your API key lives in the worker, never in this page. When set, researched coins get an 𝕏-mentions check.">𝕏 proxy URL (optional)</label>
+    <input type="text" id="xProxy" placeholder="https://x-proxy.you.workers.dev" spellcheck="false">
+  </div>
   <button id="scanBtn">Scan</button>
   <button class="secondary" id="huntBtn" title="Early-launch mode: fills sensible defaults the first time (micro-cap, under 24h), then remembers whatever filters you set while in this mode — your edits never revert. No preset predicts winners.">🎯 Early hunt</button>
   <button class="secondary" id="recoveryBtn" title="Recovery mode: fills sensible defaults the first time ($300K-$1M, up to 7 days, established coins included), then remembers whatever filters you set while in this mode — your edits never revert. Rebound-shape coins get a badge; the shape is not a probability.">🔄 Recovery</button>
@@ -1390,9 +1394,52 @@ async function researchToken(t) {
         }
       } catch (e) { /* availability check is best-effort */ }
     }
+    // 𝕏 mentions via the user's own proxy (only when configured — costs credits)
+    if (t.research) {
+      try {
+        const buzz = await xBuzz(t.mint);
+        if (buzz) {
+          t.xBuzz = buzz;
+          t.research.push(buzz.tweets === 0
+            ? { ok: false, text: "𝕏: no tweets mention this CA — no visible community" }
+            : { ok: buzz.authors >= 5, text: "𝕏: " + buzz.tweets + " recent tweet(s) by " + buzz.authors + " account(s) mention this CA" +
+                (buzz.topFollowers ? " (top account " + fmtUsd(buzz.topFollowers).replace("$", "") + " followers)" : "") +
+                (buzz.authors < 5 && buzz.tweets >= 5 ? " — few voices, possible bot spam" : "") });
+        }
+      } catch (e) {
+        t.research.push({ ok: false, text: "𝕏 check failed: " + describeError(e, "").trim() });
+      }
+    }
   } catch (e) {
     t.researchError = describeError(e, "researching " + t.pair.symbol);
   }
+}
+
+// 𝕏 buzz via the user's own Cloudflare Worker proxy (x-proxy-worker.js):
+// who is actually tweeting this contract address? Unique authors is the
+// honest metric — 40 tweets from one bot account is silence with extra steps.
+async function xBuzz(mint) {
+  const base = ((localStorage.getItem("x-proxy-url") || "").trim()).replace(/\/+$/, "");
+  if (!base) return null;
+  let res;
+  try {
+    res = await fetch(base + "/?q=" + encodeURIComponent(mint));
+  } catch (e) {
+    throw new NetworkError("𝕏 proxy");
+  }
+  if (res.status === 429 || res.status === 402) throw new RateLimitError("𝕏 API (credits/rate)");
+  if (!res.ok) throw new HttpError("𝕏 proxy", res.status);
+  const data = await res.json();
+  const tweets = (data && data.tweets) || [];
+  const authors = new Set();
+  let topFollowers = 0, engagement = 0;
+  for (const t of tweets) {
+    const a = t.author || {};
+    if (a.userName) authors.add(a.userName);
+    topFollowers = Math.max(topFollowers, a.followers || 0);
+    engagement += (t.likeCount || 0) + (t.retweetCount || 0) + (t.replyCount || 0);
+  }
+  return { tweets: tweets.length, authors: authors.size, topFollowers, engagement };
 }
 
 // Single-token security check, routed by chain; mutates the token
@@ -1475,6 +1522,7 @@ function tokenCard(t) {
           (t.curve ? '<span>Curve <b>' + (t.curve.complete ? "grad" : t.curve.progress.toFixed(0) + "%") + '</b></span>' : "") +
           (() => { const g = gapScore(t); return g == null ? "" :
             '<span title="Attention (trend+lore) minus priced-in (mcap tier + 24h run). Positive = attention not yet priced in. A present-tense reading, not a prediction.">Gap <b>' + (g > 0 ? "+" : "") + g + '</b></span>'; })() +
+          (t.xBuzz ? '<span>𝕏 <b>' + t.xBuzz.authors + '</b></span>' : "") +
           (t.narrative ? '<span>Meta <b>' + esc(t.narrative) + '</b></span>' : "") +
           (() => { const p = PHASE_BADGE[(t.runway || (t.runway = runwayAssess(t.pair))).phase];
                    return '<span class="phase ' + p.cls + '">' + p.text + '</span>'; })() +
@@ -1982,6 +2030,11 @@ function enterMode(mode) {
   if (s.checks) for (const id of CHECK_IDS) if (s.checks[id] != null) $(id).checked = s.checks[id];
 })();
 for (const id of FIELD_IDS.concat(CHECK_IDS)) $(id).addEventListener("change", () => { fillBlanks(); saveSettings(); });
+// X proxy URL persists separately (global, never in the repo)
+try { $("xProxy").value = localStorage.getItem("x-proxy-url") || ""; } catch (e) {}
+$("xProxy").addEventListener("change", () => {
+  try { localStorage.setItem("x-proxy-url", $("xProxy").value.trim()); } catch (e) {}
+});
 
 $("recoveryBtn").addEventListener("click", () => { enterMode("recovery"); runScan(); });
 $("huntBtn").addEventListener("click", () => { enterMode("early"); runScan(); });
