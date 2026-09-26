@@ -2062,6 +2062,25 @@ async function runScan() {
     activeNarrative = null;
     setFunnel(tokens.length, withPairs.length, filtered.length + truncated, passed, visible.length);
 
+    // 𝕏 scan for EVERY checked coin, not just researched passes — the
+    // silence/bot-farm detection matters most on the coins research skips.
+    // Runs only when the user's proxy is configured; cached results are free.
+    if (((localStorage.getItem("x-proxy-url") || "").trim())) {
+      const xToks = filtered.filter((t) => !t.xBuzz);
+      for (let i = 0; i < xToks.length; i++) {
+        const t = xToks[i];
+        setStatus("𝕏 scan " + (i + 1) + "/" + xToks.length + ": " + t.pair.symbol + "…", "", true, i / xToks.length);
+        try {
+          const buzz = await xBuzz(t.mint);
+          if (buzz) {
+            t.xBuzz = buzz;
+            rerenderCard(t, resultsEl);
+          }
+        } catch (e) { break; } // credits/rate issue — stop burning calls this scan
+        if (i + 1 < xToks.length) await sleep(250);
+      }
+    }
+
     const cautions = filtered.filter((t) => t.verdict === "caution").length;
     const fails = filtered.filter((t) => t.verdict === "fail").length;
     const setups = filtered.filter(isSetup).length;
