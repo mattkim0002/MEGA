@@ -420,6 +420,7 @@
   <button class="secondary" id="recoveryBtn" title="Recovery mode: fills sensible defaults the first time ($300K-$1M, up to 7 days, established coins included), then remembers whatever filters you set while in this mode — your edits never revert. Rebound-shape coins get a badge; the shape is not a probability.">🔄 Recovery</button>
   <button class="secondary" id="freshBtn" title="Fresh mode: pools minutes-to-an-hour old from the new-pools feeds, mcap-capped at $500K so anything that already ran is excluded, sorted newest first. Maximum rug density, minimum data — verdicts are often UNKNOWN this early, and strict mode will hide most results. That is the protection working, not failing.">🆕 Fresh</button>
   <button class="secondary" id="logBtn" title="The outcome log: every A/B-grade coin a scan has shown you, with what its market cap did since — including the dead ones. Review this before trusting any single scan.">📓 Log</button>
+  <button class="secondary" id="refreshBtn" title="Re-pull fresh market data (price, volume, liquidity, curve) for every coin from the last scan and recompute heat/trend/phase/grade. Security verdicts and research stay from the scan — run a new scan to redo those.">↻ Refresh</button>
   <label class="chk" title="Include launchpad bonding-curve tokens: pump.fun (Solana) and four.meme (BSC), plus the freshest BSC pools. Curve coins are judged at curve scale: min liquidity/mcap floors don't apply to them, since curves hold only $1K-$6K by design."><input type="checkbox" id="pumpFeed" checked> Launchpads (pump.fun + four.meme)</label>
   <label class="chk" title="After all checks finish, only keep coins graded A or B: PASS verdict, strong holder/LP research, real exit depth, validated traction. Most scans will show few or none — an empty list means nothing met the evidence bar, which is the protection working."><input type="checkbox" id="strictMode" checked> Strict mode</label>
 </div>
@@ -1672,6 +1673,7 @@ function tokenCard(t) {
                    return '<span class="phase ' + p.cls + '">' + p.text + '</span>'; })() +
           (isSetup(t) ? '<span class="phase ph-setup" title="PASS + EARLY + trend ≥ 60 + micro-cap: the pre-run profile. Not a prediction.">⭐ SETUP</span>' : "") +
           (isRebound(t) ? '<span class="phase ph-rebound" title="Sold off 20%+ over 24h, turning up in the last hour with buyers back, narrative present. A shape, not a probability — most dipped coins keep falling.">↩ REBOUND SHAPE</span>' : "") +
+          (t.pairGone ? '<span class="phase ph-dupe" title="On refresh, no live trading pair was found for this coin anymore — frequently means the pool was pulled. Treat as dead.">💀 PAIR GONE</span>' : "") +
           (t.dupeCount ? '<span class="phase ph-primary" title="' + t.dupeCount + ' other coin(s) in this scan share this ticker; this CA holds the deepest liquidity — chosen by market depth, not proof of authenticity. Verify via the 𝕏 search link.">① PRIMARY · ' + t.dupeCount + ' dupes</span>' : "") +
           (t.dupeOf ? '<span class="phase ph-dupe" title="Another CA in this scan (' + esc(t.dupeOf) + ') holds far deeper liquidity for this ticker — this is likely a copycat squat. Grade capped at C.">⚠ DUPE</span>' : "") +
         '</div>' +
@@ -2126,6 +2128,56 @@ async function checkSingle() {
   }
 }
 
+function narrMatch(t, term) {
+  return ((t.pair.symbol || "") + " " + (t.pair.name || "") + " " + ((t.profile && t.profile.description) || ""))
+    .toLowerCase().includes(term);
+}
+
+// Fast refresh: fresh market numbers + recomputed signals for every coin from
+// the last scan. Verdicts/research are slow-moving and stay from the scan.
+async function refreshShown() {
+  if (scanning) return;
+  if (!lastFiltered.length) { setStatus("Nothing to refresh yet — run a scan first."); return; }
+  scanning = true;
+  $("scanBtn").disabled = true;
+  try {
+    setStatus("Refreshing market data for " + lastFiltered.length + " coins…", "", true);
+    const market = await fetchMarketData(lastFiltered);
+    for (const t of lastFiltered) {
+      const p = market.get(tokenKey(t.chain, t.mint));
+      if (p) t.pair = p;
+      else t.pairGone = true; // no live pair anymore — often a pulled pool
+      t.heat = heatScore(t.pair, t.boosted);
+      t.trend = trendAssess(t);
+      t.runway = runwayAssess(t.pair);
+    }
+    const curveToks = lastFiltered.filter((t) => t.pumpfun && t.curveAddress);
+    if (curveToks.length) { try { await fetchPumpCurves(curveToks); } catch (e) { /* keep old curve */ } }
+    let visible = lastFiltered;
+    if ($("strictMode").checked) {
+      visible = lastFiltered.filter((t) => {
+        const g = gradeAssess(t);
+        return g && (g.tier === "A" || g.tier === "B");
+      });
+    }
+    lastVisible = visible;
+    $("f-shown").textContent = visible.length;
+    const show = activeNarrative ? lastFiltered.filter((t) => narrMatch(t, activeNarrative)) : visible;
+    resultsEl.innerHTML = show.length
+      ? show.map(tokenCard).join("")
+      : '<div class="card empty-strict">Nothing to show after refresh — coins may have fallen below the strict bar as their numbers moved.</div>';
+    const gone = lastFiltered.filter((t) => t.pairGone).length;
+    setStatus("Refreshed " + lastFiltered.length + " coins at " + new Date().toLocaleTimeString() +
+      (gone ? " — ⚠ " + gone + " no longer have a live pair (often a pulled pool)" : "") +
+      ". Verdicts/research are from the scan; run a new scan to redo them.");
+  } catch (e) {
+    setStatus(describeError(e, "refreshing"), "error");
+  } finally {
+    scanning = false;
+    $("scanBtn").disabled = false;
+  }
+}
+
 document.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-recheck]");
   if (!btn || scanning) return;
@@ -2290,6 +2342,7 @@ $("recoveryBtn").addEventListener("click", () => { enterMode("recovery"); runSca
 $("huntBtn").addEventListener("click", () => { enterMode("early"); runScan(); });
 $("freshBtn").addEventListener("click", () => { enterMode("fresh"); runScan(); });
 $("logBtn").addEventListener("click", () => { renderLog(); });
+$("refreshBtn").addEventListener("click", () => { refreshShown(); });
 $("checkBtn").addEventListener("click", checkSingle);
 $("mintInput").addEventListener("keydown", (e) => { if (e.key === "Enter") checkSingle(); });
 </script>
