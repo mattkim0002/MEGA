@@ -1536,8 +1536,11 @@ async function researchToken(t) {
           t.research.push(buzz.tweets === 0
             ? { ok: false, text: "𝕏: no tweets mention this CA — no visible community" }
             : { ok: buzz.authors >= 5, text: "𝕏: " + buzz.tweets + " recent tweet(s) by " + buzz.authors + " account(s) mention this CA" +
-                (buzz.topFollowers ? " (top account " + fmtUsd(buzz.topFollowers).replace("$", "") + " followers)" : "") +
+                (buzz.topAuthor ? " — biggest: @" + buzz.topAuthor.name + " (" + fmtUsd(buzz.topAuthor.followers).replace("$", "") + " followers" + (buzz.topAuthor.verified ? ", verified" : "") + ")" : "") +
                 (buzz.authors < 5 && buzz.tweets >= 5 ? " — few voices, possible bot spam" : "") });
+          if (buzz.bigCount > 0) {
+            t.research.push({ ok: true, text: "📣 " + buzz.bigCount + " account(s) with 10K+ followers tweeted this CA — real reach is on it. Caution: big-account posts are frequently PAID promotion; the promoter's exit is often the followers' entry. Read the actual tweets via the 𝕏 CA search link." });
+          }
         }
       } catch (e) {
         t.research.push({ ok: false, text: "𝕏 check failed: " + describeError(e, "").trim() });
@@ -1556,7 +1559,7 @@ async function xBuzz(mint) {
   if (!base) return null;
   // cache lookups for an hour so repeat scans do not re-spend credits
   let cache = {};
-  try { cache = JSON.parse(localStorage.getItem("x-cache-v1")) || {}; } catch (e) {}
+  try { cache = JSON.parse(localStorage.getItem("x-cache-v2")) || {}; } catch (e) {}
   const hit = cache[mint];
   if (hit && Date.now() - hit.t < 3600e3) return hit.data;
   let res;
@@ -1569,19 +1572,26 @@ async function xBuzz(mint) {
   if (!res.ok) throw new HttpError("𝕏 proxy", res.status);
   const data = await res.json();
   const tweets = (data && data.tweets) || [];
-  const authors = new Set();
-  let topFollowers = 0, engagement = 0;
-  for (const t of tweets) {
-    const a = t.author || {};
-    if (a.userName) authors.add(a.userName);
-    topFollowers = Math.max(topFollowers, a.followers || 0);
-    engagement += (t.likeCount || 0) + (t.retweetCount || 0) + (t.replyCount || 0);
+  // track WHO is tweeting, not just how many — reach is the attention signal
+  const byAuthor = new Map();
+  let engagement = 0;
+  for (const tw of tweets) {
+    const a = tw.author || {};
+    if (a.userName && !byAuthor.has(a.userName)) {
+      byAuthor.set(a.userName, { followers: a.followers || 0, verified: !!(a.isBlueVerified || a.isVerified) });
+    }
+    engagement += (tw.likeCount || 0) + (tw.retweetCount || 0) + (tw.replyCount || 0);
   }
-  const out = { tweets: tweets.length, authors: authors.size, topFollowers, engagement };
+  let topAuthor = null, topFollowers = 0, bigCount = 0;
+  for (const [name, info] of byAuthor) {
+    if (info.followers >= 10000) bigCount++;
+    if (info.followers > topFollowers) { topFollowers = info.followers; topAuthor = { name, followers: info.followers, verified: info.verified }; }
+  }
+  const out = { tweets: tweets.length, authors: byAuthor.size, topFollowers, topAuthor, bigCount, engagement };
   cache[mint] = { t: Date.now(), data: out };
   const ks = Object.keys(cache);
   if (ks.length > 200) { ks.sort((a, b) => cache[a].t - cache[b].t); for (const k of ks.slice(0, ks.length - 200)) delete cache[k]; }
-  try { localStorage.setItem("x-cache-v1", JSON.stringify(cache)); } catch (e) {}
+  try { localStorage.setItem("x-cache-v2", JSON.stringify(cache)); } catch (e) {}
   return out;
 }
 
@@ -1666,6 +1676,8 @@ function tokenCard(t) {
           (() => { const g = gapScore(t); return g == null ? "" :
             '<span title="Attention (trend+lore) minus priced-in (mcap tier + 24h run). Positive = attention not yet priced in. A present-tense reading, not a prediction.">Gap <b>' + (g > 0 ? "+" : "") + g + '</b></span>'; })() +
           (t.xBuzz ? '<span>𝕏 <b>' + t.xBuzz.authors + '</b></span>' : "") +
+          (t.xBuzz && (t.xBuzz.topFollowers >= 50000 || (t.xBuzz.topAuthor && t.xBuzz.topAuthor.verified && t.xBuzz.topFollowers >= 10000))
+            ? '<span class="phase ph-setup" title="@' + esc(t.xBuzz.topAuthor.name) + ' (' + fmtUsd(t.xBuzz.topFollowers).replace("$", "") + ' followers' + (t.xBuzz.topAuthor.verified ? ', verified' : '') + ') tweeted this CA. Big-reach attention moves memecoins — AND is frequently paid promotion where the promoter exits into the followers. Read the tweet via 𝕏 CA search before treating this as bullish.">📣 KOL</span>' : "") +
           (t.hist ? '<span title="Seen in ' + t.hist.count + ' scans over ' + fmtAge(t.hist.hours) + ' — surviving across scans with a real grade is rarer than any single-scan signal">⏱ <b>' + t.hist.count + '×/' + fmtAge(t.hist.hours) + '</b></span>' : "") +
           (t.hist && Math.abs(t.hist.trendDelta) >= 10 ? '<span title="Trend change since the previous scan — rising means the crowd is arriving between your scans">Δscan <b class="' + (t.hist.trendDelta > 0 ? "up" : "down") + '">' + (t.hist.trendDelta > 0 ? "+" : "") + t.hist.trendDelta + ' trend</b></span>' : "") +
           (t.narrative ? '<span>Meta <b>' + esc(t.narrative) + '</b></span>' : "") +
