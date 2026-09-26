@@ -1533,14 +1533,14 @@ async function researchToken(t) {
         const buzz = await xBuzz(t.mint);
         if (buzz) {
           t.xBuzz = buzz;
+          // deliberately defensive-only: silence and bot-spam detection.
+          // Who is tweeting is not surfaced as a positive — CA-tweeting
+          // accounts are overwhelmingly farmers and paid callers, and their
+          // attention is bait, not signal.
           t.research.push(buzz.tweets === 0
             ? { ok: false, text: "𝕏: no tweets mention this CA — no visible community" }
             : { ok: buzz.authors >= 5, text: "𝕏: " + buzz.tweets + " recent tweet(s) by " + buzz.authors + " account(s) mention this CA" +
-                (buzz.topAuthor ? " — biggest: @" + buzz.topAuthor.name + " (" + fmtUsd(buzz.topAuthor.followers).replace("$", "") + " followers" + (buzz.topAuthor.verified ? ", verified" : "") + ")" : "") +
                 (buzz.authors < 5 && buzz.tweets >= 5 ? " — few voices, possible bot spam" : "") });
-          if (buzz.bigCount > 0) {
-            t.research.push({ ok: true, text: "📣 " + buzz.bigCount + " account(s) with 10K+ followers tweeted this CA — real reach is on it. Caution: big-account posts are frequently PAID promotion; the promoter's exit is often the followers' entry. Read the actual tweets via the 𝕏 CA search link." });
-          }
         }
       } catch (e) {
         t.research.push({ ok: false, text: "𝕏 check failed: " + describeError(e, "").trim() });
@@ -1676,8 +1676,6 @@ function tokenCard(t) {
           (() => { const g = gapScore(t); return g == null ? "" :
             '<span title="Attention (trend+lore) minus priced-in (mcap tier + 24h run). Positive = attention not yet priced in. A present-tense reading, not a prediction.">Gap <b>' + (g > 0 ? "+" : "") + g + '</b></span>'; })() +
           (t.xBuzz ? '<span>𝕏 <b>' + t.xBuzz.authors + '</b></span>' : "") +
-          (t.xBuzz && (t.xBuzz.topFollowers >= 50000 || (t.xBuzz.topAuthor && t.xBuzz.topAuthor.verified && t.xBuzz.topFollowers >= 10000))
-            ? '<span class="phase ph-setup" title="@' + esc(t.xBuzz.topAuthor.name) + ' (' + fmtUsd(t.xBuzz.topFollowers).replace("$", "") + ' followers' + (t.xBuzz.topAuthor.verified ? ', verified' : '') + ') tweeted this CA. Big-reach attention moves memecoins — AND is frequently paid promotion where the promoter exits into the followers. Read the tweet via 𝕏 CA search before treating this as bullish.">📣 KOL</span>' : "") +
           (t.hist ? '<span title="Seen in ' + t.hist.count + ' scans over ' + fmtAge(t.hist.hours) + ' — surviving across scans with a real grade is rarer than any single-scan signal">⏱ <b>' + t.hist.count + '×/' + fmtAge(t.hist.hours) + '</b></span>' : "") +
           (t.hist && Math.abs(t.hist.trendDelta) >= 10 ? '<span title="Trend change since the previous scan — rising means the crowd is arriving between your scans">Δscan <b class="' + (t.hist.trendDelta > 0 ? "up" : "down") + '">' + (t.hist.trendDelta > 0 ? "+" : "") + t.hist.trendDelta + ' trend</b></span>' : "") +
           (t.narrative ? '<span>Meta <b>' + esc(t.narrative) + '</b></span>' : "") +
