@@ -2297,9 +2297,10 @@ async function renderLog() {
       outcome = fmtUsd(e.mcap) + " → " + fmtUsd(nowCap) + " (" + (pct >= 0 ? "+" : "") + pct.toFixed(0) + "%)";
     }
     return '<div class="card"><div class="card-head" style="cursor:default">' +
-      '<div class="tok-id"><div class="tok-name"><div class="sym">' + esc(e.sym) + ' <span class="chain-chip">' + esc(e.chain) + '</span></div>' +
+      '<div class="tok-id"><div class="tok-name"><div class="sym">' + esc(e.sym) + ' <span class="chain-chip">' + esc(e.chain) + '</span> <button class="mini-btn" data-recheck="' + esc(e.mint) + '">↻ recheck</button></div>' +
       '<div class="nm">shown ' + fmtAge((now - e.t) / 3.6e6) + ' ago at grade ' + esc(e.tier) + '</div></div></div>' +
       '<span class="metrics"><b class="' + cls + '">' + outcome + '</b></span>' +
+      '<div class="mint-line">CA: ' + esc(e.mint) + '</div>' +
       '</div></div>';
   }).join("");
   resultsEl.innerHTML = '<div class="section-title">Outcome log — every A/B coin shown (' + up + ' up · ' + down + ' down · ' + dead + ' dead)</div>' + rows;
