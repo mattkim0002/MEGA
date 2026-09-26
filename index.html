@@ -315,6 +315,19 @@
 
   .section-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 16px 0 8px; }
   .empty-strict { padding: 16px; color: var(--ink-2); font-size: 0.85rem; line-height: 1.5; }
+  .mini-btn {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    margin-left: 8px;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+  .mini-btn:hover { border-color: var(--accent); color: var(--ink); }
   .radar {
     display: flex;
     flex-wrap: wrap;
@@ -1461,10 +1474,30 @@ async function researchToken(t) {
       const d = t._gp;
       const pts = [];
       const holders = parseInt(d.holder_count, 10);
-      if (!isNaN(holders)) pts.push({ ok: holders >= 500, text: holders.toLocaleString() + " holders" + (holders < 500 ? " — small base" : "") });
-      const hs = (d.holders || []).filter((h) => h.is_contract !== 1 && h.is_locked !== 1);
-      const top10 = 100 * hs.slice(0, 10).reduce((s, h) => s + num(h.percent), 0);
-      pts.push({ ok: top10 <= 30, text: "top 10 wallets hold " + top10.toFixed(1) + "% (contracts/locked excluded)" + (top10 > 30 ? " — concentrated" : "") });
+      // GoPlus's holder indexer lags badly on young chains (it reported 6 on
+      // a coin with 2,776 holders) — cross-check GeckoTerminal when the count
+      // is missing or implausibly small
+      const GECKO_NETS = { bsc: "bsc", robinhood: "robinhood", base: "base", ethereum: "eth" };
+      let gtInfo = null;
+      if ((isNaN(holders) || holders < 50) && GECKO_NETS[t.chain]) {
+        try {
+          const gi = await fetchJsonPaced("https://api.geckoterminal.com/api/v2/networks/" + GECKO_NETS[t.chain] + "/tokens/" + t.mint + "/info", "GeckoTerminal (info)");
+          gtInfo = gi && gi.data && gi.data.attributes;
+        } catch (e) { /* fall back to GoPlus numbers */ }
+      }
+      if (gtInfo && gtInfo.holders && gtInfo.holders.count != null) {
+        const hc = gtInfo.holders.count;
+        t.holders = hc;
+        pts.push({ ok: hc >= 500, text: hc.toLocaleString() + " holders (GeckoTerminal — GoPlus lags on young chains)" + (hc < 500 ? " — small base" : "") });
+        const top10 = parseFloat((gtInfo.holders.distribution_percentage || {}).top_10);
+        if (!isNaN(top10)) pts.push({ ok: top10 <= 40, text: "top 10 holders own " + top10.toFixed(1) + "% (GeckoTerminal; may include pools)" + (top10 > 40 ? " — concentrated" : "") });
+        if (gtInfo.gt_score != null) pts.push({ ok: gtInfo.gt_score >= 50, text: "GeckoTerminal trust score " + Math.round(gtInfo.gt_score) + "/100" });
+      } else {
+        if (!isNaN(holders)) pts.push({ ok: holders >= 500, text: holders.toLocaleString() + " holders" + (holders < 500 ? " — small base" : "") });
+        const hs = (d.holders || []).filter((h) => h.is_contract !== 1 && h.is_locked !== 1);
+        const top10 = 100 * hs.slice(0, 10).reduce((s, h) => s + num(h.percent), 0);
+        pts.push({ ok: top10 <= 30, text: "top 10 wallets hold " + top10.toFixed(1) + "% (contracts/locked excluded)" + (top10 > 30 ? " — concentrated" : "") });
+      }
       const lpLocked = 100 * (d.lp_holders || []).reduce((s, h) => s + (h.is_locked === 1 ? num(h.percent) : 0), 0);
       pts.push({ ok: lpLocked >= 50, text: "LP " + lpLocked.toFixed(0) + "% locked/burned" });
       if (lpLocked < 50) t.lpRisk = true;
@@ -2077,7 +2110,7 @@ async function checkSingle() {
         createdAt: null, url: "https://dexscreener.com/" + chain + "/" + mint,
       },
     };
-    singleEl.innerHTML = '<div class="section-title">Single token check</div>' + tokenCard(t);
+    singleEl.innerHTML = '<div class="section-title">Single token check <button class="mini-btn" data-recheck="' + esc(mint) + '" title="Re-pull everything fresh: market data, security, curve, research, holders">↻ recheck</button></div>' + tokenCard(t);
     setStatus("Running " + (chain === "solana" ? "RugCheck" : "GoPlus") + " on " + t.pair.symbol + " (" + chain + ")…", "", true);
     await securityCheckOne(t);
     if (t.verdict === "pass" || t.verdict === "caution") {
@@ -2093,6 +2126,12 @@ async function checkSingle() {
   }
 }
 
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-recheck]");
+  if (!btn || scanning) return;
+  $("mintInput").value = btn.dataset.recheck;
+  checkSingle();
+});
 $("scanBtn").addEventListener("click", () => { fillBlanks(); saveSettings(); runScan(); });
 /* ---------- scan memory: survival, deltas, and the outcome log ---------- */
 
