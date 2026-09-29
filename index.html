@@ -403,10 +403,10 @@
     <div class="help-head">🔍 Quick guide <button id="helpClose" class="mini-btn">✕ close</button></div>
     <p><b>1. Pick a hunt and tap it.</b> <b>Scan</b> = general sweep · <b>🎯 Early hunt</b> = under 24h, $20K–$1M · <b>🐣 Low cap</b> = $5K–$150K micro-caps · <b>🆕 Fresh</b> = minutes old (riskiest, least data) · <b>🔄 Recovery</b> = older coins that sold off. Filters remember your changes per mode; clear a box to reset it.</p>
     <p><b>2. Read the funnel.</b> Fetched → live pairs → met filters → passed → shown. It checks hundreds and usually shows a handful. <i>An empty result means nothing met the evidence bar — that's the answer, not an error.</i></p>
-    <p><b>3. Read a card.</b> <b>Grade A–F</b> = overall evidence (strict mode shows only A/B; F = failed rug check, always skip). <b>PASS</b> means "not rigged", <i>not</i> "good". <b>Heat</b> = price momentum · <b>Trend</b> = crowd · <b>Lore</b> = story depth · <b>Gap</b> = early (+) or late (−) · <b>𝕏</b> = real accounts on it · <b>Curve</b> = pump.fun progress on-chain. Phases: EARLY / RUNNING (up big, still bid) / EXTENDED (late — you'd be exit liquidity) / QUIET. Badges: ⭐ SETUP pre-run pattern · ↩ REBOUND dip turning · ⚠ DUPE copycat ticker · 💀 PAIR GONE died since scan.</p>
+    <p><b>3. Read a card.</b> <b>Risk level A–F</b>: A = low risk (relative) · B = medium-low · C = medium · D = high · F = failed security, never touch. Strict mode shows only A/B. <b>PASS</b> means "not rigged", <i>not</i> "good". <b>Heat</b> = price momentum · <b>Trend</b> = crowd · <b>Lore</b> = story depth · <b>Gap</b> = early (+) or late (−) · <b>𝕏</b> = real accounts on it · <b>Curve</b> = pump.fun progress on-chain. Phases: EARLY / RUNNING (up big, still bid) / EXTENDED (late — you'd be exit liquidity) / QUIET. Badges: ⭐ SETUP pre-run pattern · ↩ REBOUND dip turning · ⚠ DUPE copycat ticker · 💀 PAIR GONE died since scan.</p>
     <p><b>4. Tap a card to expand:</b> run-room, engagement and deep-research checks (holders, LP lock, insiders, creator history) each with ✓/✕ — plus links: <b>Bubblemaps</b> (one connected web of wallets = leave), <b>𝕏 CA search</b> (who actually posts it), Solscan, DexScreener.</p>
     <p><b>5. Other buttons.</b> <b>↻ Refresh</b> = fresh numbers for all shown coins · <b>☆</b> = pin to Watchlist · <b>🚫</b> = never show this coin again · <b>📓 Log</b> = every A/B coin ever shown and what happened to it since — <i>read it weekly, it's the truth about how this game goes</i> · paste any contract address in the check box for a full single-coin workup · tap a narrative chip to see that meta's coins.</p>
-    <p class="help-rule"><b>The one rule:</b> grades rank <b>evidence, not winners</b>. An A-grade memecoin is a lottery ticket that isn't rigged — most still go to zero. This app's job is keeping you out of scams; empty days are it working.</p>
+    <p class="help-rule"><b>The one rule:</b> risk levels measure <b>risk of being rigged, not chance of winning</b>. A low-risk-A memecoin is a lottery ticket that isn't rigged — most still go to zero. This app's job is keeping you out of scams; empty days are it working.</p>
   </div>
 </div>
 
@@ -442,7 +442,7 @@
   <div class="field">
     <label for="sortBy">Sort by</label>
     <select id="sortBy">
-      <option value="grade" selected>Grade (signal quality)</option>
+      <option value="grade" selected>Risk level (lowest first)</option>
       <option value="heat">Heat (momentum)</option>
       <option value="trend">Trend (engagement)</option>
       <option value="lore">Lore (story depth)</option>
@@ -467,10 +467,10 @@
   <button class="secondary" id="recoveryBtn" title="Recovery mode: fills sensible defaults the first time ($300K-$1M, up to 7 days, established coins included), then remembers whatever filters you set while in this mode — your edits never revert. Rebound-shape coins get a badge; the shape is not a probability.">🔄 Recovery</button>
   <button class="secondary" id="freshBtn" title="Fresh mode: pools minutes-to-an-hour old from the new-pools feeds, mcap-capped at $500K so anything that already ran is excluded, sorted newest first. Maximum rug density, minimum data — verdicts are often UNKNOWN this early, and strict mode will hide most results. That is the protection working, not failing.">🆕 Fresh</button>
   <button class="secondary" id="lowcapBtn" title="Low-cap mode: micro-cap band ($5K-$150K mcap), under 24h old, gentle floors sized to tiny pools. Fills these defaults the first time, then remembers whatever you set while in this mode. Smallest caps = biggest theoretical multiples AND the highest death rate — the two are the same fact.">🐣 Low cap</button>
-  <button class="secondary" id="logBtn" title="The outcome log: every A/B-grade coin a scan has shown you, with what its market cap did since — including the dead ones. Review this before trusting any single scan.">📓 Log</button>
+  <button class="secondary" id="logBtn" title="The outcome log: every low-risk (A/B) coin a scan has shown you, with what its market cap did since — including the dead ones. Review this before trusting any single scan.">📓 Log</button>
   <button class="secondary" id="refreshBtn" title="Re-pull fresh market data (price, volume, liquidity, curve) for every coin from the last scan and recompute heat/trend/phase/grade. Security verdicts and research stay from the scan — run a new scan to redo those.">↻ Refresh</button>
   <label class="chk" title="Include launchpad bonding-curve tokens: pump.fun (Solana) and four.meme (BSC), plus the freshest BSC pools. Curve coins are judged at curve scale: min liquidity/mcap floors don't apply to them, since curves hold only $1K-$6K by design."><input type="checkbox" id="pumpFeed" checked> Launchpads (pump.fun + four.meme)</label>
-  <label class="chk" title="After all checks finish, only keep coins graded A or B: PASS verdict, strong holder/LP research, real exit depth, validated traction. Most scans will show few or none — an empty list means nothing met the evidence bar, which is the protection working."><input type="checkbox" id="strictMode" checked> Strict mode</label>
+  <label class="chk" title="After all checks finish, only keep coins at risk level A or B (lower-risk): PASS verdict, strong holder/LP research, real exit depth, validated traction. Most scans will show few or none — an empty list means nothing met the evidence bar, which is the protection working."><input type="checkbox" id="strictMode" checked> Strict mode</label>
 </div>
 
 <div class="single">
@@ -491,8 +491,8 @@
   <a href="https://gopluslabs.io" target="_blank" rel="noopener">GoPlus</a> (EVM/Tron) &middot;
   fallback: <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">GeckoTerminal</a> (Solana only).
   Not financial advice &mdash; a PASS only means no automated flags, Heat measures current
-  activity (not future performance), and grades rank relative signal quality within a scan:
-  an A-grade memecoin is still a lottery ticket, just not a rigged one.
+  activity (not future performance), and risk levels rate the risk of being rigged, not the
+  chance of winning: a low-risk memecoin is still a lottery ticket, just not a rigged one.
 </footer>
 
 <script>
@@ -1281,11 +1281,11 @@ function gradeAssess(t) {
 }
 
 const GRADE_TITLE = {
-  A: "A — strongest evidence stack in this scan (clean security, healthy structure, real exit depth). Still a lottery ticket: most memecoins go to zero regardless of grade. Not a buy recommendation.",
-  B: "B — decent signals with some gaps. Relative quality only — not a buy recommendation.",
-  C: "C — weak, unverified, or hard to exit. Relative quality only — not a buy recommendation.",
-  D: "D — high risk: poor signals across the board.",
-  F: "F — failed the security check. Avoid.",
+  A: "Risk level A — LOW RISK (relative): clean security, healthy holder structure, real exit depth. Low risk of being rigged — NOT low risk of losing: most memecoins go to zero regardless of level.",
+  B: "Risk level B — MEDIUM-LOW risk: decent evidence with some gaps.",
+  C: "Risk level C — MEDIUM risk: weak, unverified, or hard to exit.",
+  D: "Risk level D — HIGH risk: poor signals across the board.",
+  F: "Risk level F — FAILED the security check. Do not touch.",
 };
 
 function gradeHtml(t) {
@@ -2205,7 +2205,7 @@ async function runScan() {
     recordScan(filtered, visible); // memory: attaches cross-scan signals + logs shown coins
     resultsEl.innerHTML = visible.length
       ? visible.map(tokenCard).join("")
-      : '<div class="card empty-strict">Nothing met the strict evidence bar this scan (grade A or B). ' +
+      : '<div class="card empty-strict">Nothing met the strict evidence bar this scan (risk level A or B). ' +
         'That is the filter doing its job — no coin today had clean security, strong holder research, and real exit depth all at once. ' +
         'An empty list is information, not malfunction.</div>';
     lastFiltered = filtered;
@@ -2447,7 +2447,7 @@ function recordScan(filtered, visible) {
       };
     }
   }
-  // the outcome log tracks A/B-grade coins only — the ones the evidence bar
+  // the outcome log tracks low-risk (A/B) coins only — the ones the evidence bar
   // endorsed — whether or not strict mode was hiding the rest
   for (const t of filtered) {
     const g = gradeAssess(t);
@@ -2469,7 +2469,7 @@ async function renderLog() {
   if (scanning) return;
   const h = loadHistory();
   if (!h.log.length) {
-    resultsEl.innerHTML = '<div class="card empty-strict">No shown coins logged yet — the log records every A/B-grade coin a scan shows you, then tracks what happened to it. Run scans and come back.</div>';
+    resultsEl.innerHTML = '<div class="card empty-strict">No shown coins logged yet — the log records every low-risk (A/B) coin a scan shows you, then tracks what happened to it. Run scans and come back.</div>';
     return;
   }
   setStatus("Loading outcomes for your logged coins…", "", true);
@@ -2494,7 +2494,7 @@ async function renderLog() {
     }
     return '<div class="card"><div class="card-head" style="cursor:default">' +
       '<div class="tok-id"><div class="tok-name"><div class="sym">' + esc(e.sym) + ' <span class="chain-chip">' + esc(e.chain) + '</span> <button class="mini-btn" data-recheck="' + esc(e.mint) + '">↻ recheck</button></div>' +
-      '<div class="nm">shown ' + fmtAge((now - e.t) / 3.6e6) + ' ago at grade ' + esc(e.tier) + '</div></div></div>' +
+      '<div class="nm">shown ' + fmtAge((now - e.t) / 3.6e6) + ' ago at risk level ' + esc(e.tier) + '</div></div></div>' +
       '<span class="metrics"><b class="' + cls + '">' + outcome + '</b></span>' +
       '<div class="mint-line">CA: ' + esc(e.mint) + '</div>' +
       '</div></div>';
