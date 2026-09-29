@@ -333,6 +333,32 @@
     letter-spacing: normal;
   }
   .mini-btn:hover { border-color: var(--accent); color: var(--ink); }
+  .help-card {
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    font-size: 0.83rem;
+    line-height: 1.55;
+    color: var(--ink-2);
+  }
+  .help-card p { margin: 0 0 10px; }
+  .help-card b { color: var(--ink); }
+  .help-head {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--ink);
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .help-rule {
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+    margin-bottom: 0 !important;
+  }
   .radar {
     display: flex;
     flex-wrap: wrap;
@@ -367,10 +393,22 @@
 </head>
 <body>
 <header>
-  <h1>Memecoin Launch Screener
+  <h1>Memecoin Launch Screener <button id="helpBtn" class="mini-btn" title="How to use the app">? Guide</button>
     <span class="sub">DexScreener latest + boosted tokens, all chains &middot; liquidity / volume / age filters &middot; RugCheck (Solana) + GoPlus (EVM) verdicts</span>
   </h1>
 </header>
+
+<div id="helpPanel" style="display:none">
+  <div class="help-card">
+    <div class="help-head">🔍 Quick guide <button id="helpClose" class="mini-btn">✕ close</button></div>
+    <p><b>1. Pick a hunt and tap it.</b> <b>Scan</b> = general sweep · <b>🎯 Early hunt</b> = under 24h, $20K–$1M · <b>🐣 Low cap</b> = $5K–$150K micro-caps · <b>🆕 Fresh</b> = minutes old (riskiest, least data) · <b>🔄 Recovery</b> = older coins that sold off. Filters remember your changes per mode; clear a box to reset it.</p>
+    <p><b>2. Read the funnel.</b> Fetched → live pairs → met filters → passed → shown. It checks hundreds and usually shows a handful. <i>An empty result means nothing met the evidence bar — that's the answer, not an error.</i></p>
+    <p><b>3. Read a card.</b> <b>Grade A–F</b> = overall evidence (strict mode shows only A/B; F = failed rug check, always skip). <b>PASS</b> means "not rigged", <i>not</i> "good". <b>Heat</b> = price momentum · <b>Trend</b> = crowd · <b>Lore</b> = story depth · <b>Gap</b> = early (+) or late (−) · <b>𝕏</b> = real accounts on it · <b>Curve</b> = pump.fun progress on-chain. Phases: EARLY / RUNNING (up big, still bid) / EXTENDED (late — you'd be exit liquidity) / QUIET. Badges: ⭐ SETUP pre-run pattern · ↩ REBOUND dip turning · ⚠ DUPE copycat ticker · 💀 PAIR GONE died since scan.</p>
+    <p><b>4. Tap a card to expand:</b> run-room, engagement and deep-research checks (holders, LP lock, insiders, creator history) each with ✓/✕ — plus links: <b>Bubblemaps</b> (one connected web of wallets = leave), <b>𝕏 CA search</b> (who actually posts it), Solscan, DexScreener.</p>
+    <p><b>5. Other buttons.</b> <b>↻ Refresh</b> = fresh numbers for all shown coins · <b>☆</b> = pin to Watchlist · <b>🚫</b> = never show this coin again · <b>📓 Log</b> = every A/B coin ever shown and what happened to it since — <i>read it weekly, it's the truth about how this game goes</i> · paste any contract address in the check box for a full single-coin workup · tap a narrative chip to see that meta's coins.</p>
+    <p class="help-rule"><b>The one rule:</b> grades rank <b>evidence, not winners</b>. An A-grade memecoin is a lottery ticket that isn't rigged — most still go to zero. This app's job is keeping you out of scams; empty days are it working.</p>
+  </div>
+</div>
 
 <div class="funnel" aria-label="Scan funnel">
   <div class="tile"><div class="label">Fetched</div><div class="value" id="f-fetched">&ndash;</div></div>
@@ -2532,6 +2570,11 @@ $("huntBtn").addEventListener("click", () => { enterMode("early"); runScan(); })
 $("freshBtn").addEventListener("click", () => { enterMode("fresh"); runScan(); });
 $("lowcapBtn").addEventListener("click", () => { enterMode("lowcap"); runScan(); });
 $("logBtn").addEventListener("click", () => { renderLog(); });
+$("helpBtn").addEventListener("click", () => {
+  const p = $("helpPanel");
+  p.style.display = p.style.display === "none" ? "" : "none";
+});
+$("helpClose").addEventListener("click", () => { $("helpPanel").style.display = "none"; });
 function updateMutedCount() { try { $("mutedCount").textContent = Object.keys(loadPrefs().muted).length; } catch (e) {} }
 updateMutedCount();
 renderWatchlist();
