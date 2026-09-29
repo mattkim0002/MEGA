@@ -419,6 +419,7 @@
   <button class="secondary" id="huntBtn" title="Early-launch mode: fills sensible defaults the first time (micro-cap, under 24h), then remembers whatever filters you set while in this mode — your edits never revert. No preset predicts winners.">🎯 Early hunt</button>
   <button class="secondary" id="recoveryBtn" title="Recovery mode: fills sensible defaults the first time ($300K-$1M, up to 7 days, established coins included), then remembers whatever filters you set while in this mode — your edits never revert. Rebound-shape coins get a badge; the shape is not a probability.">🔄 Recovery</button>
   <button class="secondary" id="freshBtn" title="Fresh mode: pools minutes-to-an-hour old from the new-pools feeds, mcap-capped at $500K so anything that already ran is excluded, sorted newest first. Maximum rug density, minimum data — verdicts are often UNKNOWN this early, and strict mode will hide most results. That is the protection working, not failing.">🆕 Fresh</button>
+  <button class="secondary" id="lowcapBtn" title="Low-cap mode: micro-cap band ($5K-$150K mcap), under 24h old, gentle floors sized to tiny pools. Fills these defaults the first time, then remembers whatever you set while in this mode. Smallest caps = biggest theoretical multiples AND the highest death rate — the two are the same fact.">🐣 Low cap</button>
   <button class="secondary" id="logBtn" title="The outcome log: every A/B-grade coin a scan has shown you, with what its market cap did since — including the dead ones. Review this before trusting any single scan.">📓 Log</button>
   <button class="secondary" id="refreshBtn" title="Re-pull fresh market data (price, volume, liquidity, curve) for every coin from the last scan and recompute heat/trend/phase/grade. Security verdicts and research stay from the scan — run a new scan to redo those.">↻ Refresh</button>
   <label class="chk" title="Include launchpad bonding-curve tokens: pump.fun (Solana) and four.meme (BSC), plus the freshest BSC pools. Curve coins are judged at curve scale: min liquidity/mcap floors don't apply to them, since curves hold only $1K-$6K by design."><input type="checkbox" id="pumpFeed" checked> Launchpads (pump.fun + four.meme)</label>
@@ -2321,6 +2322,7 @@ const MODE_TEMPLATES = {
   early:    { minLiq: 5000,  minVol: 5000,  maxAge: 24,  minMcap: 20000,  maxMcap: 1000000, sortBy: "grade" },
   recovery: { minLiq: 10000, minVol: 10000, maxAge: 168, minMcap: 300000, maxMcap: 1000000, sortBy: "grade" },
   fresh:    { minLiq: 1000,  minVol: 1000,  maxAge: 1,   minMcap: 0,      maxMcap: 500000,  sortBy: "newest" },
+  lowcap:   { minLiq: 2000,  minVol: 3000,  maxAge: 24,  minMcap: 5000,   maxMcap: 150000,  sortBy: "grade" },
 };
 
 function fillBlanks() {
@@ -2371,6 +2373,7 @@ $("xProxy").addEventListener("change", () => {
 $("recoveryBtn").addEventListener("click", () => { enterMode("recovery"); runScan(); });
 $("huntBtn").addEventListener("click", () => { enterMode("early"); runScan(); });
 $("freshBtn").addEventListener("click", () => { enterMode("fresh"); runScan(); });
+$("lowcapBtn").addEventListener("click", () => { enterMode("lowcap"); runScan(); });
 $("logBtn").addEventListener("click", () => { renderLog(); });
 $("refreshBtn").addEventListener("click", () => { refreshShown(); });
 $("checkBtn").addEventListener("click", checkSingle);
