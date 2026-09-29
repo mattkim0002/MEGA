@@ -415,6 +415,9 @@
       <label for="xProxy" title="Optional: URL of your own Cloudflare Worker proxy for twitterapi.io (see x-proxy-worker.js in the repo). Your API key lives in the worker, never in this page. When set, researched coins get an 𝕏-mentions check.">𝕏 proxy URL (optional)</label>
       <input type="text" id="xProxy" placeholder="https://x-proxy.you.workers.dev" spellcheck="false">
     </div>
+    <div style="margin-top: 8px; font-size: 0.75rem; color: var(--muted);">
+      Muted coins: <span id="mutedCount">0</span> <button class="mini-btn" id="clearMuted">clear all</button>
+    </div>
   </details>
   <button id="scanBtn">Scan</button>
   <button class="secondary" id="huntBtn" title="Early-launch mode: fills sensible defaults the first time (micro-cap, under 24h), then remembers whatever filters you set while in this mode — your edits never revert. No preset predicts winners.">🎯 Early hunt</button>
@@ -434,6 +437,7 @@
 
 <div id="status">Ready. Press Scan to fetch the latest launches.</div>
 <div id="metaRadar"></div>
+<div id="watchlist"></div>
 
 <div id="singleResult"></div>
 <div id="results"></div>
@@ -1715,7 +1719,12 @@ function tokenCard(t) {
             '<div class="nm">' + esc(t.pair.name) + '</div>' +
           '</div>' +
         '</div>' +
-        '<span class="head-badges">' + gradeHtml(t) + '<span class="verdict ' + badge.cls + '">' + badge.text + '</span></span>' +
+        '<span class="head-badges">' +
+          (() => { const key = tokenKey(t.chain, t.mint); const watched = !!loadPrefs().watch[key];
+            const cap = t.pair.marketCap != null ? t.pair.marketCap : (t.pair.fdv || 0);
+            return '<button class="mini-btn" data-watch-key="' + esc(key) + '" data-sym="' + esc(t.pair.symbol) + '" data-chain="' + esc(t.chain) + '" data-mint="' + esc(t.mint) + '" data-mcap="' + cap + '" title="' + (watched ? "Remove from watchlist" : "Pin to watchlist — tracked with fresh data every scan") + '">' + (watched ? "★" : "☆") + '</button>' +
+              '<button class="mini-btn" data-mute-key="' + esc(key) + '" data-sym="' + esc(t.pair.symbol) + '" title="Never show this coin again (mutes it from all future scans)">🚫</button>'; })() +
+          gradeHtml(t) + '<span class="verdict ' + badge.cls + '">' + badge.text + '</span></span>' +
         '<div class="metrics">' +
           '<span>Liq <b>' + fmtUsd(t.pair.liquidity) + '</b></span>' +
           '<span>Vol24h <b>' + fmtUsd(t.pair.volume24) + '</b></span>' +
@@ -1845,7 +1854,7 @@ function rerenderCard(t, container) {
 
 document.addEventListener("click", (e) => {
   const head = e.target.closest(".card-head");
-  if (head && !e.target.closest("a")) head.parentElement.classList.toggle("open");
+  if (head && !e.target.closest("a,button")) head.parentElement.classList.toggle("open");
 });
 
 function setFunnel(fetched, live, filtered, passed, shown) {
@@ -1868,7 +1877,7 @@ async function runScan() {
   try {
     // 1. Discover tokens
     setStatus("Fetching latest + boosted Solana tokens from DexScreener…", "", true);
-    let tokens, usedFallback = false;
+    let tokens, usedFallback = false, mutedCount = 0;
     try {
       tokens = await discoverTokens();
     } catch (e) {
@@ -1965,6 +1974,12 @@ async function runScan() {
         if (!t.profile && t.pair.infoProfile) t.profile = t.pair.infoProfile;
         if (!t.twitterHandle && t.pair.twitter) t.twitterHandle = t.pair.twitter;
       }
+      // muted coins are excluded before filtering so they never consume
+      // check slots — the never-show-again list
+      const mutedMap = loadPrefs().muted;
+      const beforeMute = withPairs.length;
+      withPairs = withPairs.filter((t) => !mutedMap[tokenKey(t.chain, t.mint)]);
+      mutedCount = beforeMute - withPairs.length;
     }
     setFunnel(tokens.length, withPairs.length, null, null);
     renderMetaRadar(detectNarratives(withPairs));
@@ -2163,9 +2178,11 @@ async function runScan() {
     setStatus("Done" + (usedFallback ? " (via GeckoTerminal fallback)" : "") + ": " +
       passed + " passed, " + cautions + " caution, " + fails + " failed" +
       (hidden ? " — strict mode: " + visible.length + " shown, " + hidden + " hidden below the A/B bar" : "") +
+      (mutedCount ? " — 🚫 " + mutedCount + " muted" : "") +
       (setups ? " — ⭐ " + setups + " match the early-hunt profile" : "") +
       ((() => { const n = filtered.filter(isRebound).length; return n ? " — ↩ " + n + " show the rebound shape" : ""; })()) +
       (truncated ? " — top " + MAX_RUGCHECKS + " by current sort checked, " + truncated + " more met filters" : "") + ".");
+    renderWatchlist();
   } catch (e) {
     setStatus(describeError(e, "scanning"), "error");
   } finally {
@@ -2290,6 +2307,66 @@ document.addEventListener("click", (e) => {
   checkSingle();
 });
 $("scanBtn").addEventListener("click", () => { fillBlanks(); saveSettings(); runScan(); });
+/* ---------- user prefs: mute (never show again) and watchlist ---------- */
+
+const PREFS_KEY = "screener-prefs-v1";
+function loadPrefs() {
+  try { return JSON.parse(localStorage.getItem(PREFS_KEY)) || { muted: {}, watch: {} }; }
+  catch (e) { return { muted: {}, watch: {} }; }
+}
+function savePrefs(p) { try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (e) {} }
+
+// Watchlist: starred coins pinned above results with fresh data each scan
+async function renderWatchlist() {
+  const p = loadPrefs();
+  const entries = Object.values(p.watch);
+  const el = $("watchlist");
+  if (!entries.length) { el.innerHTML = ""; return; }
+  let market = new Map();
+  try { market = await fetchMarketData(entries); } catch (e) { /* render stale */ }
+  const rows = entries.map((e) => {
+    const key = tokenKey(e.chain, e.mint);
+    const pair = market.get(key);
+    const cap = pair ? (pair.marketCap != null ? pair.marketCap : pair.fdv) : null;
+    const dead = !pair || !(cap > 0);
+    const pct = !dead && e.mcap > 0 ? 100 * (cap - e.mcap) / e.mcap : null;
+    return '<div class="card"><div class="card-head" style="cursor:default">' +
+      '<div class="tok-id"><div class="tok-name"><div class="sym">★ ' + esc(e.sym) + ' <span class="chain-chip">' + esc(e.chain) + '</span>' +
+      ' <button class="mini-btn" data-watch-key="' + esc(key) + '" data-sym="' + esc(e.sym) + '" data-chain="' + esc(e.chain) + '" data-mint="' + esc(e.mint) + '">✕ unwatch</button>' +
+      ' <button class="mini-btn" data-recheck="' + esc(e.mint) + '">↻ recheck</button></div>' +
+      '<div class="nm">watched ' + fmtAge((Date.now() - e.t) / 3.6e6) + ' ago' + (e.mcap ? ' @ mcap ' + fmtUsd(e.mcap) : '') + '</div></div></div>' +
+      '<span class="metrics"><b class="' + (dead ? "down" : pct >= 0 ? "up" : "down") + '">' +
+      (dead ? "no live pair — dead or delisted" : fmtUsd(cap) + (pct != null ? " (" + (pct >= 0 ? "+" : "") + pct.toFixed(0) + "%)" : "")) + '</b></span>' +
+      '</div></div>';
+  }).join("");
+  el.innerHTML = '<div class="section-title">★ Watchlist</div>' + rows;
+}
+
+document.addEventListener("click", (e) => {
+  const mute = e.target.closest("[data-mute-key]");
+  if (mute) {
+    const p = loadPrefs();
+    p.muted[mute.dataset.muteKey] = { sym: mute.dataset.sym || "", t: Date.now() };
+    savePrefs(p);
+    const card = mute.closest(".card");
+    if (card) card.remove();
+    lastFiltered = lastFiltered.filter((t) => tokenKey(t.chain, t.mint) !== mute.dataset.muteKey);
+    lastVisible = lastVisible.filter((t) => tokenKey(t.chain, t.mint) !== mute.dataset.muteKey);
+    return;
+  }
+  const w = e.target.closest("[data-watch-key]");
+  if (w) {
+    const p = loadPrefs();
+    const key = w.dataset.watchKey;
+    if (p.watch[key]) delete p.watch[key];
+    else p.watch[key] = { sym: w.dataset.sym || "", chain: w.dataset.chain, mint: w.dataset.mint, mcap: parseFloat(w.dataset.mcap) || 0, t: Date.now() };
+    savePrefs(p);
+    const t = lastFiltered.find((x) => tokenKey(x.chain, x.mint) === key);
+    if (t) rerenderCard(t, resultsEl);
+    renderWatchlist();
+  }
+});
+
 /* ---------- scan memory: survival, deltas, and the outcome log ---------- */
 
 // Every scan records what it saw (in this browser only). Two signals come
@@ -2450,6 +2527,13 @@ $("huntBtn").addEventListener("click", () => { enterMode("early"); runScan(); })
 $("freshBtn").addEventListener("click", () => { enterMode("fresh"); runScan(); });
 $("lowcapBtn").addEventListener("click", () => { enterMode("lowcap"); runScan(); });
 $("logBtn").addEventListener("click", () => { renderLog(); });
+function updateMutedCount() { try { $("mutedCount").textContent = Object.keys(loadPrefs().muted).length; } catch (e) {} }
+updateMutedCount();
+renderWatchlist();
+document.addEventListener("click", (e) => { if (e.target.closest("[data-mute-key]")) updateMutedCount(); });
+$("clearMuted").addEventListener("click", () => {
+  const p = loadPrefs(); p.muted = {}; savePrefs(p); updateMutedCount();
+});
 $("refreshBtn").addEventListener("click", () => { refreshShown(); });
 $("checkBtn").addEventListener("click", checkSingle);
 $("mintInput").addEventListener("keydown", (e) => { if (e.key === "Enter") checkSingle(); });
