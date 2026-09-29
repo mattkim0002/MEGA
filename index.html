@@ -404,6 +404,7 @@
       <option value="trend">Trend (engagement)</option>
       <option value="lore">Lore (story depth)</option>
       <option value="gap">Gap (attention vs priced-in)</option>
+      <option value="attention">Attention (𝕏 buzz)</option>
       <option value="volume">24h volume</option>
       <option value="newest">Newest</option>
     </select>
@@ -598,6 +599,13 @@ async function discoverTokens() {
       hasIcon: !!item.icon,
       cto: item.cto === true,
     };
+    let twitterHandle = null;
+    for (const l of item.links || []) {
+      if (((l.type || "") + "").toLowerCase() === "twitter" && l.url) {
+        const m = String(l.url).match(/(?:twitter|x)\.com\/@?([A-Za-z0-9_]{1,15})(?=[\/?#]|$)/i);
+        if (m && !["i", "search", "intent", "home", "hashtag", "share"].includes(m[1].toLowerCase())) { twitterHandle = m[1]; break; }
+      }
+    }
     const existing = byKey.get(key);
     if (existing) {
       // token can appear in both feeds — merge the engagement/lore data
@@ -615,7 +623,7 @@ async function discoverTokens() {
     const t = {
       mint: item.tokenAddress, chain: item.chainId,
       boosted: item.totalAmount != null, boostAmount, socials: linkTypes.size,
-      profile,
+      profile, twitterHandle,
     };
     byKey.set(key, t);
     tokens.push(t);
@@ -858,12 +866,21 @@ function pairFromDex(p, fallbackChain) {
   const info = p.info || {};
   const linkTypes = new Set();
   for (const w of info.websites || []) linkTypes.add("website");
-  for (const s of info.socials || []) linkTypes.add(((s.type || "link") + "").toLowerCase());
+  let twitterHandle = null;
+  for (const s of info.socials || []) {
+    const ty = ((s.type || "link") + "").toLowerCase();
+    linkTypes.add(ty);
+    if (ty === "twitter" && s.url && !twitterHandle) {
+      const m = String(s.url).match(/(?:twitter|x)\.com\/@?([A-Za-z0-9_]{1,15})(?=[\/?#]|$)/i);
+      if (m && !["i", "search", "intent", "home", "hashtag", "share"].includes(m[1].toLowerCase())) twitterHandle = m[1];
+    }
+  }
   const infoProfile = (linkTypes.size || info.header || info.imageUrl)
     ? { description: "", linkTypes, hasHeader: !!info.header, hasIcon: !!info.imageUrl, cto: false }
     : null;
   return {
     infoProfile,
+    twitter: twitterHandle,
     chain,
     symbol: (p.baseToken.symbol || "").trim() || mint.slice(0, 6),
     name: p.baseToken.name || "",
@@ -1141,6 +1158,20 @@ function gapScore(t) {
   return Math.round(attention - pricedIn);
 }
 
+// Attention score (0-100): 𝕏 breadth around the coin — topic authors, official
+// page size, CA-mention authors. The most farmable composite in the app, so it
+// gets its own sort and a slice of the grade's activity points, never the
+// grade's risk core: paid attention is precisely what rug setups buy first.
+function attentionScore(t) {
+  if (!t.xBuzz && !t.xTopic && !t.xPage) return null;
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  let s = 0;
+  if (t.xTopic) s += 40 * clamp01(t.xTopic.authors / 15);
+  if (t.xPage) s += 40 * clamp01(Math.log10((t.xPage.followers || 0) + 1) / 5); // 100K followers → full
+  if (t.xBuzz) s += 20 * clamp01(t.xBuzz.authors / 10);
+  return Math.round(s);
+}
+
 // Composite grade A-F: relative signal quality within this scan, weighted
 // toward risk evidence (security, holder research, exit depth) over activity.
 // Hard gates: FAIL verdict = F always; unknown verdict, thin exit depth, or
@@ -1174,9 +1205,15 @@ function gradeAssess(t) {
                   0.5 * (cap > 0 ? clamp01(((t.pair.volume24 || 0) / cap) / 2) : 0);
   const loreFrac = t.lore && t.lore.score != null ? t.lore.score / 100 : 0;
   const trendFrac = t.trend && t.trend.score != null ? t.trend.score / 100 : 0;
-  score += isEarlyStage
-    ? 8 * loreFrac + 8 * volFrac + 4 * trendFrac
-    : 10 * trendFrac + 8 * volFrac + 2 * loreFrac;
+  const attn = attentionScore(t);
+  // stage-aware weights over 20 activity points; attention joins when 𝕏 data
+  // exists and the pool renormalizes so proxy-less users are not penalized
+  const parts = isEarlyStage
+    ? [[6, loreFrac], [6, volFrac], [4, trendFrac]]
+    : [[8, trendFrac], [6, volFrac], [2, loreFrac]];
+  if (attn != null) parts.push([4, attn / 100]);
+  const wsum = parts.reduce((s, p) => s + p[0], 0);
+  score += 20 * parts.reduce((s, p) => s + p[0] * p[1], 0) / wsum;
   // caps: unverified, hard-to-exit, or copycat coins can't grade above C
   let capTier = 100;
   if (t.verdict === "unknown") capTier = 59;
@@ -1555,45 +1592,65 @@ async function researchToken(t) {
 // 𝕏 buzz via the user's own Cloudflare Worker proxy (x-proxy-worker.js):
 // who is actually tweeting this contract address? Unique authors is the
 // honest metric — 40 tweets from one bot account is silence with extra steps.
-async function xBuzz(mint) {
+// Shared proxy fetch with 1h caching (keys: mint, "topic:SYM", "user:handle")
+async function xProxyFetch(cacheKey, query) {
   const base = ((localStorage.getItem("x-proxy-url") || "").trim()).replace(/\/+$/, "");
   if (!base) return null;
-  // cache lookups for an hour so repeat scans do not re-spend credits
   let cache = {};
-  try { cache = JSON.parse(localStorage.getItem("x-cache-v2")) || {}; } catch (e) {}
-  const hit = cache[mint];
+  try { cache = JSON.parse(localStorage.getItem("x-cache-v3")) || {}; } catch (e) {}
+  const hit = cache[cacheKey];
   if (hit && Date.now() - hit.t < 3600e3) return hit.data;
   let res;
   try {
-    res = await fetch(base + "/?q=" + encodeURIComponent(mint));
+    res = await fetch(base + "/?" + query);
   } catch (e) {
     throw new NetworkError("𝕏 proxy");
   }
   if (res.status === 429 || res.status === 402) throw new RateLimitError("𝕏 API (credits/rate)");
   if (!res.ok) throw new HttpError("𝕏 proxy", res.status);
   const data = await res.json();
+  cache[cacheKey] = { t: Date.now(), data };
+  const ks = Object.keys(cache);
+  if (ks.length > 400) { ks.sort((a, b) => cache[a].t - cache[b].t); for (const k of ks.slice(0, ks.length - 400)) delete cache[k]; }
+  try { localStorage.setItem("x-cache-v3", JSON.stringify(cache)); } catch (e) {}
+  return data;
+}
+
+function summarizeTweets(data) {
   const tweets = (data && data.tweets) || [];
-  // track WHO is tweeting, not just how many — reach is the attention signal
-  const byAuthor = new Map();
+  const authors = new Set();
   let engagement = 0;
   for (const tw of tweets) {
     const a = tw.author || {};
-    if (a.userName && !byAuthor.has(a.userName)) {
-      byAuthor.set(a.userName, { followers: a.followers || 0, verified: !!(a.isBlueVerified || a.isVerified) });
-    }
+    if (a.userName) authors.add(a.userName);
     engagement += (tw.likeCount || 0) + (tw.retweetCount || 0) + (tw.replyCount || 0);
   }
-  let topAuthor = null, topFollowers = 0, bigCount = 0;
-  for (const [name, info] of byAuthor) {
-    if (info.followers >= 10000) bigCount++;
-    if (info.followers > topFollowers) { topFollowers = info.followers; topAuthor = { name, followers: info.followers, verified: info.verified }; }
-  }
-  const out = { tweets: tweets.length, authors: byAuthor.size, topFollowers, topAuthor, bigCount, engagement };
-  cache[mint] = { t: Date.now(), data: out };
-  const ks = Object.keys(cache);
-  if (ks.length > 200) { ks.sort((a, b) => cache[a].t - cache[b].t); for (const k of ks.slice(0, ks.length - 200)) delete cache[k]; }
-  try { localStorage.setItem("x-cache-v2", JSON.stringify(cache)); } catch (e) {}
-  return out;
+  return { tweets: tweets.length, authors: authors.size, engagement };
+}
+
+async function xBuzz(mint) {
+  const data = await xProxyFetch(mint, "q=" + encodeURIComponent(mint));
+  return data ? summarizeTweets(data) : null;
+}
+
+// Topic buzz: how much the TICKER (not just the CA) is being talked about.
+// Broader than CA mentions, and even more farmable — read as breadth, not truth.
+async function xTopic(symbol) {
+  const sym = (symbol || "").replace(/[^A-Za-z0-9]/g, "");
+  if (sym.length < 2 || sym.length > 15) return null;
+  const data = await xProxyFetch("topic:" + sym.toLowerCase(), "q=" + encodeURIComponent("$" + sym));
+  return data ? summarizeTweets(data) : null;
+}
+
+// Official page: the coin's own X account size — a real community-scale signal
+// (an account can buy followers, but a coin with NO page and no followers has
+// no community by definition)
+async function xPage(handle) {
+  if (!handle) return null;
+  const data = await xProxyFetch("user:" + handle.toLowerCase(), "user=" + encodeURIComponent(handle));
+  const u = (data && data.data) || null;
+  if (!u || u.followers == null) return null;
+  return { handle, followers: u.followers || 0, verified: !!(u.isBlueVerified || u.isVerified) };
 }
 
 // Single-token security check, routed by chain; mutates the token
@@ -1677,6 +1734,8 @@ function tokenCard(t) {
           (() => { const g = gapScore(t); return g == null ? "" :
             '<span title="Attention (trend+lore) minus priced-in (mcap tier + 24h run). Positive = attention not yet priced in. A present-tense reading, not a prediction.">Gap <b>' + (g > 0 ? "+" : "") + g + '</b></span>'; })() +
           (t.xBuzz ? '<span>𝕏 <b>' + t.xBuzz.authors + '</b></span>' : "") +
+          (t.xTopic ? '<span title="Accounts tweeting the $TICKER topic — broader than CA mentions, and even more farmable">Topic𝕏 <b>' + t.xTopic.authors + '</b></span>' : "") +
+          (t.xPage ? '<span title="The coin&#39;s official X page (@' + esc(t.xPage.handle) + ') follower count">Page <b>' + fmtUsd(t.xPage.followers).replace("$", "") + (t.xPage.verified ? "✓" : "") + '</b></span>' : "") +
           (t.hist ? '<span title="Seen in ' + t.hist.count + ' scans over ' + fmtAge(t.hist.hours) + ' — surviving across scans with a real grade is rarer than any single-scan signal">⏱ <b>' + t.hist.count + '×/' + fmtAge(t.hist.hours) + '</b></span>' : "") +
           (t.hist && Math.abs(t.hist.trendDelta) >= 10 ? '<span title="Trend change since the previous scan — rising means the crowd is arriving between your scans">Δscan <b class="' + (t.hist.trendDelta > 0 ? "up" : "down") + '">' + (t.hist.trendDelta > 0 ? "+" : "") + t.hist.trendDelta + ' trend</b></span>' : "") +
           (t.narrative ? '<span>Meta <b>' + esc(t.narrative) + '</b></span>' : "") +
@@ -1902,7 +1961,10 @@ async function runScan() {
         .filter((t) => t.pair);
       // tokens without a profiles-feed entry still get lore signals from
       // the pair listing's social/branding info
-      for (const t of withPairs) if (!t.profile && t.pair.infoProfile) t.profile = t.pair.infoProfile;
+      for (const t of withPairs) {
+        if (!t.profile && t.pair.infoProfile) t.profile = t.pair.infoProfile;
+        if (!t.twitterHandle && t.pair.twitter) t.twitterHandle = t.pair.twitter;
+      }
     }
     setFunnel(tokens.length, withPairs.length, null, null);
     renderMetaRadar(detectNarratives(withPairs));
@@ -1946,9 +2008,9 @@ async function runScan() {
       t.lore = loreAssess(t);
     }
     if (sortBy === "heat") filtered.sort((a, b) => b.heat - a.heat);
-    else if (sortBy === "trend" || sortBy === "grade") filtered.sort((a, b) => (b.trend.score || 0) - (a.trend.score || 0));
-    // grade sort starts as a trend sort — grades need the security/research
-    // results, so the list re-ranks itself once all checks are done
+    else if (sortBy === "trend" || sortBy === "grade" || sortBy === "attention") filtered.sort((a, b) => (b.trend.score || 0) - (a.trend.score || 0));
+    // grade/attention sorts start as a trend sort — they need the checks and
+    // the 𝕏 scan, so the list re-ranks itself once everything is in
     else if (sortBy === "lore") filtered.sort((a, b) => (b.lore.score || 0) - (a.lore.score || 0));
     else if (sortBy === "gap") filtered.sort((a, b) => (gapScore(b) ?? -999) - (gapScore(a) ?? -999));
     else if (sortBy === "newest") filtered.sort((a, b) => (b.pair.createdAt || 0) - (a.pair.createdAt || 0));
@@ -2035,6 +2097,34 @@ async function runScan() {
       if (t.chain === "solana" && i + 1 < toResearch.length) await sleep(RUGCHECK_DELAY_MS);
     }
 
+    // 𝕏 scan for EVERY checked coin — CA mentions (silence/bot detection),
+    // topic buzz on the ticker, and the official page's follower count.
+    // Runs before grading so attention can feed the grade's activity slice.
+    if (((localStorage.getItem("x-proxy-url") || "").trim())) {
+      for (let i = 0; i < filtered.length; i++) {
+        const t = filtered[i];
+        setStatus("𝕏 scan " + (i + 1) + "/" + filtered.length + ": " + t.pair.symbol + "…", "", true, i / filtered.length);
+        let rateLimited = false;
+        const soft = async (fn) => { try { await fn(); } catch (e) { if (e instanceof RateLimitError) rateLimited = true; } };
+        await soft(async () => { if (!t.xBuzz) { const b = await xBuzz(t.mint); if (b) t.xBuzz = b; } });
+        await soft(async () => { if (!t.xTopic) { const tp = await xTopic(t.pair.symbol); if (tp) t.xTopic = tp; } });
+        await soft(async () => { if (!t.xPage && t.twitterHandle) { const pg = await xPage(t.twitterHandle); if (pg) t.xPage = pg; } });
+        if (t.research) {
+          if (t.xTopic && !t._topicRow) {
+            t._topicRow = true;
+            t.research.push({ ok: t.xTopic.authors >= 5, text: "𝕏 topic $" + t.pair.symbol + ": " + t.xTopic.tweets + " tweet(s) by " + t.xTopic.authors + " account(s)" + (t.xTopic.authors < 5 && t.xTopic.tweets >= 5 ? " — few voices, likely farmed" : "") });
+          }
+          if (t.xPage && !t._pageRow) {
+            t._pageRow = true;
+            t.research.push({ ok: t.xPage.followers >= 500, text: "𝕏 page @" + t.xPage.handle + ": " + t.xPage.followers.toLocaleString() + " followers" + (t.xPage.verified ? " (verified)" : "") + (t.xPage.followers < 500 ? " — tiny page" : "") });
+          }
+        }
+        rerenderCard(t, resultsEl);
+        if (rateLimited) break; // credits/rate issue — stop burning calls this scan
+        if (i + 1 < filtered.length) await sleep(250);
+      }
+    }
+
     // Final pass now that every signal is in: re-rank by grade, then apply
     // strict mode (A/B evidence bar) to what stays visible
     if (sortBy === "grade") {
@@ -2042,6 +2132,8 @@ async function runScan() {
         const ga = gradeAssess(a), gb = gradeAssess(b);
         return (gb ? gb.score : -1) - (ga ? ga.score : -1);
       });
+    } else if (sortBy === "attention") {
+      filtered.sort((a, b) => (attentionScore(b) ?? -1) - (attentionScore(a) ?? -1));
     }
     let hidden = 0;
     let visible = filtered;
@@ -2063,24 +2155,7 @@ async function runScan() {
     activeNarrative = null;
     setFunnel(tokens.length, withPairs.length, filtered.length + truncated, passed, visible.length);
 
-    // 𝕏 scan for EVERY checked coin, not just researched passes — the
-    // silence/bot-farm detection matters most on the coins research skips.
-    // Runs only when the user's proxy is configured; cached results are free.
-    if (((localStorage.getItem("x-proxy-url") || "").trim())) {
-      const xToks = filtered.filter((t) => !t.xBuzz);
-      for (let i = 0; i < xToks.length; i++) {
-        const t = xToks[i];
-        setStatus("𝕏 scan " + (i + 1) + "/" + xToks.length + ": " + t.pair.symbol + "…", "", true, i / xToks.length);
-        try {
-          const buzz = await xBuzz(t.mint);
-          if (buzz) {
-            t.xBuzz = buzz;
-            rerenderCard(t, resultsEl);
-          }
-        } catch (e) { break; } // credits/rate issue — stop burning calls this scan
-        if (i + 1 < xToks.length) await sleep(250);
-      }
-    }
+    // 𝕏 scan moved before the final grading pass (see above)
 
     const cautions = filtered.filter((t) => t.verdict === "caution").length;
     const fails = filtered.filter((t) => t.verdict === "fail").length;
