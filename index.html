@@ -403,7 +403,7 @@
     <div class="help-head">🔍 Quick guide <button id="helpClose" class="mini-btn">✕ close</button></div>
     <p><b>1. Pick a hunt and tap it.</b> <b>Scan</b> = general sweep · <b>🎯 Early hunt</b> = under 24h, $20K–$1M · <b>🐣 Low cap</b> = $5K–$150K micro-caps · <b>🆕 Fresh</b> = minutes old (riskiest, least data) · <b>🔄 Recovery</b> = older coins that sold off. Filters remember your changes per mode; clear a box to reset it.</p>
     <p><b>2. Read the funnel.</b> Fetched → live pairs → met filters → passed → shown. It checks hundreds and usually shows a handful. <i>An empty result means nothing met the evidence bar — that's the answer, not an error.</i></p>
-    <p><b>3. Read a card.</b> <b>Risk level A–F</b>: A = low risk (relative) · B = medium-low · C = medium · D = high · F = failed security, never touch. Strict mode shows only A/B. <b>PASS</b> means "not rigged", <i>not</i> "good". <b>Heat</b> = price momentum · <b>Trend</b> = crowd · <b>Lore</b> = story depth · <b>Gap</b> = early (+) or late (−) · <b>𝕏</b> = real accounts on it · <b>Curve</b> = pump.fun progress on-chain. Phases: EARLY / RUNNING (up big, still bid) / EXTENDED (late — you'd be exit liquidity) / QUIET. Badges: ⭐ SETUP pre-run pattern · ↩ REBOUND dip turning · ⚠ DUPE copycat ticker · 💀 PAIR GONE died since scan.</p>
+    <p><b>3. Read a card.</b> <b>Risk level A–F</b>: A = low risk (relative) · B = medium-low · C = medium · D = high · F = failed security, never touch. Strict mode shows only A/B. <b>PASS</b> means "not rigged", <i>not</i> "good". <b>Heat</b> = price momentum · <b>Trend</b> = crowd · <b>Lore</b> = story depth · <b>Gap</b> = early (+) or late (−) · <b>𝕏</b> = real accounts on it · <b>Curve</b> = pump.fun progress on-chain. Phases: EARLY / RUNNING (up big, still bid) / EXTENDED (late — you'd be exit liquidity) / QUIET. Badges: ⭐ SETUP pre-run pattern · ↩ REBOUND dip turning · ⚠ DUPE copycat ticker · 💀 PAIR GONE died since scan · 🫧 BIG CLUSTER linked wallets hold 10%+ of supply (the 🫧 chip shows the largest cluster's share; Solana only).</p>
     <p><b>4. Tap a card to expand:</b> run-room, engagement and deep-research checks (holders, LP lock, insiders, creator history) each with ✓/✕ — plus links: <b>Bubblemaps</b> (one connected web of wallets = leave), <b>𝕏 CA search</b> (who actually posts it), Solscan, DexScreener.</p>
     <p><b>5. Other buttons.</b> <b>↻ Refresh</b> = fresh numbers for all shown coins · <b>☆</b> = pin to Watchlist · <b>🚫</b> = never show this coin again · <b>📓 Log</b> = every A/B coin ever shown and what happened to it since — <i>read it weekly, it's the truth about how this game goes</i> · paste any contract address in the check box for a full single-coin workup · tap a narrative chip to see that meta's coins.</p>
     <p class="help-rule"><b>The one rule:</b> risk levels measure <b>risk of being rigged, not chance of winning</b>. A low-risk-A memecoin is a lottery ticket that isn't rigged — most still go to zero. This app's job is keeping you out of scams; empty days are it working.</p>
@@ -1266,6 +1266,8 @@ function gradeAssess(t) {
   if (t.verdict === "unknown") capTier = 59;
   if (t.dupeOf) capTier = Math.min(capTier, 59);
   if (t.serialRisk) capTier = Math.min(capTier, 59);
+  // a large linked-wallet cluster can exit in one coordinated move
+  if (t.cluster && t.cluster.level === "large") capTier = Math.min(capTier, 59);
   // young coin with unlocked/unverified LP: the deployer can pull the pool at
   // any moment — a clean contract doesn't matter when the rug lever is the LP
   // itself (established coins are exempt; V3-era liquidity is rarely locked)
@@ -1544,9 +1546,33 @@ async function researchToken(t) {
         .filter((h) => h.owner === d.creator || h.address === d.creator)
         .reduce((s, h) => s + (h.pct || 0), 0);
       pts.push({ ok: creatorPct <= 5, text: "creator holds " + creatorPct.toFixed(1) + "% of supply" });
-      const insiders = d.graphInsidersDetected || 0;
-      pts.push({ ok: insiders === 0, text: insiders === 0 ? "no insider wallet networks detected"
-        : insiders + " insider wallets in " + (d.insiderNetworks || []).length + " network(s) — supply may be coordinated" });
+      // Wallet clusters: RugCheck groups wallets linked by transfers — the same
+      // thing a big connected bubble on Bubblemaps shows. Size them by share
+      // of supply so "is there a large cluster?" gets a direct answer.
+      const supply = Number((d.token && d.token.supply) || 0);
+      const nets = (d.insiderNetworks || []).map((n) => ({
+        wallets: n.size || n.activeAccounts || 0,
+        pct: supply > 0 ? 100 * Number(n.currentHolding != null ? n.currentHolding : n.tokenAmount || 0) / supply : null,
+      }));
+      if (!nets.length) {
+        t.cluster = { level: "none", largestPct: 0, totalPct: 0, wallets: 0, count: 0 };
+        pts.push({ ok: true, text: "🫧 no linked-wallet clusters found" });
+      } else {
+        const sized = nets.filter((n) => n.pct != null).sort((a, b) => b.pct - a.pct);
+        const top = sized[0] || { pct: null, wallets: nets[0].wallets };
+        const totalPct = sized.reduce((s, n) => s + n.pct, 0);
+        const level = top.pct == null ? "unknown"
+          : (top.pct >= 10 || totalPct >= 30) ? "large"
+          : (top.pct >= 5 || totalPct >= 15) ? "medium" : "small";
+        t.cluster = { level, largestPct: top.pct || 0, totalPct, wallets: top.wallets, count: nets.length };
+        pts.push({
+          ok: level === "small",
+          text: "🫧 " + (level === "large" ? "LARGE CLUSTER: " : level === "medium" ? "notable cluster: " : "small clusters only: ") +
+            (top.pct != null ? top.wallets + " linked wallets hold " + top.pct.toFixed(1) + "% of supply" : nets.length + " linked-wallet group(s)") +
+            (nets.length > 1 && top.pct != null ? " · " + nets.length + " clusters hold " + totalPct.toFixed(1) + "% combined" : "") +
+            (level === "large" ? " — one entity can dump this in a single move" : ""),
+        });
+      }
       // serial-deployer check: creator wallet's other launches — factory
       // scammers deploy dozens; a first-timer or small count is normal
       const priorTokens = Array.isArray(d.creatorTokens) ? d.creatorTokens.length : 0;
@@ -1785,6 +1811,9 @@ function tokenCard(t) {
           (t.curve ? '<span>Curve <b>' + (t.curve.complete ? "grad" : t.curve.progress.toFixed(0) + "%") + '</b></span>' : "") +
           (() => { const g = gapScore(t); return g == null ? "" :
             '<span title="Attention (trend+lore) minus priced-in (mcap tier + 24h run). Positive = attention not yet priced in. A present-tense reading, not a prediction.">Gap <b>' + (g > 0 ? "+" : "") + g + '</b></span>'; })() +
+          (t.cluster ? '<span title="Largest group of transfer-linked wallets and its share of supply (Solana, via RugCheck — the same thing a big connected bubble on Bubblemaps shows)">🫧 <b class="' + (t.cluster.level === "large" ? "down" : t.cluster.level === "none" || t.cluster.level === "small" ? "up" : "") + '">' +
+            (t.cluster.level === "none" ? "none" : t.cluster.largestPct.toFixed(1) + "%") + '</b></span>' : "") +
+          (t.cluster && t.cluster.level === "large" ? '<span class="phase ph-dupe" title="' + t.cluster.wallets + ' transfer-linked wallets hold ' + t.cluster.largestPct.toFixed(1) + '% of supply — one entity controlling that much can dump it in a single move. Risk level capped at C.">🫧 BIG CLUSTER</span>' : "") +
           (t.xBuzz ? '<span>𝕏 <b>' + t.xBuzz.authors + '</b></span>' : "") +
           (t.xTopic ? '<span title="Accounts tweeting the $TICKER topic — broader than CA mentions, and even more farmable">Topic𝕏 <b>' + t.xTopic.authors + '</b></span>' : "") +
           (t.xPage ? '<span title="The coin&#39;s official X page (@' + esc(t.xPage.handle) + ') follower count">Page <b>' + fmtUsd(t.xPage.followers).replace("$", "") + (t.xPage.verified ? "✓" : "") + '</b></span>' : "") +
@@ -1847,6 +1876,7 @@ function cardBody(t) {
   '<div class="rw">' +
     '<div class="rw-head">Deep research — holders &amp; liquidity (' + t.research.filter((p) => p.ok).length + "/" + t.research.length + ' OK)</div>' +
     t.research.map(sigRow).join("") +
+    (t.chain !== "solana" ? '<div class="rw-note">🫧 Wallet-cluster check is Solana-only (no free cluster data for other chains) — open the Bubblemaps link below and look for one big connected blob.</div>' : "") +
   '</div>'
   : t.researchError ?
   '<div class="rw"><div class="rw-head">Deep research</div><div class="rw-note">' + esc(t.researchError) + '</div></div>'
@@ -2280,10 +2310,10 @@ async function checkSingle() {
     singleEl.innerHTML = '<div class="section-title">Single token check <button class="mini-btn" data-recheck="' + esc(mint) + '" title="Re-pull everything fresh: market data, security, curve, research, holders">↻ recheck</button></div>' + tokenCard(t);
     setStatus("Running " + (chain === "solana" ? "RugCheck" : "GoPlus") + " on " + t.pair.symbol + " (" + chain + ")…", "", true);
     await securityCheckOne(t);
-    if (t.verdict === "pass" || t.verdict === "caution") {
-      setStatus("Deep research on " + t.pair.symbol + " (holders, LP lock, insiders)…", "", true);
-      await researchToken(t);
-    }
+    // single checks always research — on a failed coin the holder/cluster
+    // data is often the explanation for the failure
+    setStatus("Deep research on " + t.pair.symbol + " (holders, LP lock, clusters)…", "", true);
+    await researchToken(t);
     rerenderCard(t, singleEl);
     document.querySelector('#singleResult .card').classList.add("open");
     const badge = VERDICT_BADGE[t.verdict];
