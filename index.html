@@ -403,7 +403,7 @@
     <div class="help-head">🔍 Quick guide <button id="helpClose" class="mini-btn">✕ close</button></div>
     <p><b>1. Pick a hunt and tap it.</b> <b>Scan</b> = general sweep · <b>🎯 Early hunt</b> = under 24h, $20K–$1M · <b>🐣 Low cap</b> = $5K–$150K micro-caps · <b>🆕 Fresh</b> = minutes old (riskiest, least data) · <b>🔄 Recovery</b> = older coins that sold off. Filters remember your changes per mode; clear a box to reset it.</p>
     <p><b>2. Read the funnel.</b> Fetched → live pairs → met filters → passed → shown. It checks hundreds and usually shows a handful. <i>An empty result means nothing met the evidence bar — that's the answer, not an error.</i></p>
-    <p><b>3. Read a card.</b> <b>Risk level A–F</b>: A = low risk (relative) · B = medium-low · C = medium · D = high · F = failed security, never touch. Strict mode shows only A/B. <b>PASS</b> means "not rigged", <i>not</i> "good". <b>Heat</b> = price momentum · <b>Trend</b> = crowd · <b>Lore</b> = story depth · <b>Gap</b> = early (+) or late (−) · <b>𝕏</b> = real accounts on it · <b>Curve</b> = pump.fun progress on-chain. Phases: EARLY / RUNNING (up big, still bid) / EXTENDED (late — you'd be exit liquidity) / QUIET. Badges: ⭐ SETUP pre-run pattern · ↩ REBOUND dip turning · ⚠ DUPE copycat ticker · 💀 PAIR GONE died since scan · 🫧 BIG CLUSTER linked wallets hold 10%+ of supply (the 🫧 chip shows the largest cluster's share; Solana only).</p>
+    <p><b>3. Read a card.</b> <b>Risk level A–F</b>: A = low risk (relative) · B = medium-low · C = medium · D = high · F = failed security, never touch. Strict mode shows only A/B. <b>PASS</b> means "not rigged", <i>not</i> "good". <b>Heat</b> = price momentum · <b>Trend</b> = crowd · <b>Lore</b> = story depth · <b>Gap</b> = early (+) or late (−) · <b>𝕏</b> = real accounts on it · <b>Curve</b> = pump.fun progress on-chain. Phases: EARLY / RUNNING (up big, still bid) / EXTENDED (late — you'd be exit liquidity) / QUIET. Badges: ⭐ SETUP pre-run pattern · ↩ REBOUND dip turning · ⚠ DUPE copycat ticker · 💀 PAIR GONE died since scan · 🫧 BIG CLUSTER linked wallets hold 10%+ of supply (the 🫧 chip shows the largest cluster's share; free on Solana, any chain with an optional Bubblemaps API key under ⚙ Advanced — which also adds the <b>BM</b> decentralization score, 0–100).</p>
     <p><b>4. Tap a card to expand:</b> run-room, engagement and deep-research checks (holders, LP lock, insiders, creator history) each with ✓/✕ — plus links: <b>Bubblemaps</b> (one connected web of wallets = leave), <b>𝕏 CA search</b> (who actually posts it), Solscan, DexScreener.</p>
     <p><b>5. Other buttons.</b> <b>↻ Refresh</b> = fresh numbers for all shown coins · <b>☆</b> = pin to Watchlist · <b>🚫</b> = never show this coin again · <b>📓 Log</b> = every A/B coin ever shown and what happened to it since — <i>read it weekly, it's the truth about how this game goes</i> · paste any contract address in the check box for a full single-coin workup · tap a narrative chip to see that meta's coins.</p>
     <p class="help-rule"><b>The one rule:</b> risk levels measure <b>risk of being rigged, not chance of winning</b>. A low-risk-A memecoin is a lottery ticket that isn't rigged — most still go to zero. This app's job is keeping you out of scams; empty days are it working.</p>
@@ -457,6 +457,10 @@
     <div class="field" style="margin-top: 8px;">
       <label for="xProxy" title="Optional: URL of your own Cloudflare Worker proxy for twitterapi.io (see x-proxy-worker.js in the repo). Your API key lives in the worker, never in this page. When set, researched coins get an 𝕏-mentions check.">𝕏 proxy URL (optional)</label>
       <input type="text" id="xProxy" placeholder="https://x-proxy.you.workers.dev" spellcheck="false">
+    </div>
+    <div class="field" style="margin-top: 8px;">
+      <label for="bmKey" title="Optional: your own Bubblemaps Data API key (from their Pro platform). Saved only in this browser — never in the page code. Adds the Bubblemaps score and wallet-cluster share to researched coins on Solana AND EVM chains. 25 credits per coin, cached 6 hours.">Bubblemaps API key (optional)</label>
+      <input type="password" id="bmKey" placeholder="paste key — stored only in this browser" spellcheck="false" autocomplete="off">
     </div>
     <div style="margin-top: 8px; font-size: 0.75rem; color: var(--muted);">
       Muted coins: <span id="mutedCount">0</span> <button class="mini-btn" id="clearMuted">clear all</button>
@@ -612,6 +616,48 @@ const BUBBLEMAPS_CHAINS = {
   solana: "sol", ethereum: "eth", bsc: "bsc", base: "base", arbitrum: "arbi",
   polygon: "poly", avalanche: "avax", fantom: "ftm", cronos: "cro",
 };
+
+// Bubblemaps Data API (paid, bring-your-own key). The key lives only in this
+// browser's localStorage — never in the page source — and their API allows
+// browser calls directly, so no proxy is needed.
+const BM_API_CHAINS = {
+  solana: "solana", ethereum: "eth", bsc: "bsc", base: "base", tron: "tron",
+  polygon: "polygon", avalanche: "avalanche", arbitrum: "arbitrum", sonic: "sonic",
+  robinhood: "robinhood", hyperevm: "hyperevm", monad: "monad",
+};
+let bmCreditsOut = false;
+async function bmMetrics(t) {
+  const key = (localStorage.getItem("bm-api-key") || "").trim();
+  const chain = BM_API_CHAINS[t.chain];
+  if (!key || !chain || bmCreditsOut) return null;
+  // 25 credits per call — cache 6h so rescans and refreshes cost nothing
+  let cache = {};
+  try { cache = JSON.parse(localStorage.getItem("bm-cache-v1")) || {}; } catch (e) {}
+  const ck = chain + ":" + t.mint;
+  if (cache[ck] && Date.now() - cache[ck].t < 6 * 3600e3) return cache[ck].data;
+  let res;
+  try {
+    res = await fetch("https://api.bubblemaps.io/v0/tokens/metrics/" + chain + "/" + encodeURIComponent(t.mint), { headers: { "X-ApiKey": key } });
+  } catch (e) { throw new NetworkError("Bubblemaps API"); }
+  if (res.status === 429) { bmCreditsOut = true; throw new RateLimitError("Bubblemaps API (credits/rate)"); }
+  if (res.status === 401 || res.status === 403) { bmCreditsOut = true; throw new HttpError("Bubblemaps API (invalid key)", res.status); }
+  if (res.status === 404) return null; // map not computed for this token yet
+  if (!res.ok) throw new HttpError("Bubblemaps API", res.status);
+  const d = await res.json();
+  const ss = d.supply_stats || {}, sc = d.scores || {};
+  const out = {
+    score: sc.bubblemaps_score != null ? Math.round(sc.bubblemaps_score) : null,
+    clusters: ss.bundles != null ? 100 * ss.bundles : null,          // top-10 clusters' share
+    top10: ss.top_10_adjusted != null ? 100 * ss.top_10_adjusted : null,
+    fresh: ss.fresh_wallets != null ? 100 * ss.fresh_wallets : null,
+    nakamoto: sc.nakamoto_coefficient != null ? sc.nakamoto_coefficient : null,
+  };
+  cache[ck] = { t: Date.now(), data: out };
+  const ks = Object.keys(cache);
+  if (ks.length > 300) { ks.sort((a, b) => cache[a].t - cache[b].t); for (const k of ks.slice(0, ks.length - 300)) delete cache[k]; }
+  try { localStorage.setItem("bm-cache-v1", JSON.stringify(cache)); } catch (e) {}
+  return out;
+}
 
 // GeckoTerminal throttles bursts hard — retry once after a backoff on 429
 async function fetchJsonPaced(url, source) {
@@ -1638,6 +1684,36 @@ async function researchToken(t) {
         }
       } catch (e) { /* availability check is best-effort */ }
     }
+    // Bubblemaps Data API (optional key): their decentralization score and
+    // cluster share — the only cluster source that covers EVM chains
+    if (t.research) {
+      try {
+        const m = await bmMetrics(t);
+        if (m) {
+          t.bm = m;
+          t.research.push({
+            ok: (m.score == null || m.score >= 50) && (m.clusters == null || m.clusters < 30),
+            text: "🫧 Bubblemaps: " +
+              (m.score != null ? "score " + m.score + "/100" : "score n/a") +
+              (m.clusters != null ? " · top clusters hold " + m.clusters.toFixed(1) + "%" : "") +
+              (m.top10 != null ? " · top-10 entities " + m.top10.toFixed(1) + "%" : "") +
+              (m.fresh != null ? " · fresh wallets " + m.fresh.toFixed(1) + "%" : "") +
+              (m.nakamoto != null ? " · " + m.nakamoto + " entities control 50%" : ""),
+          });
+          // merge into the cluster verdict — keep whichever source is more alarming
+          if (m.clusters != null) {
+            const lvl = (m.clusters >= 30 || (m.score != null && m.score < 25)) ? "large"
+              : (m.clusters >= 15 || (m.score != null && m.score < 50)) ? "medium" : "small";
+            const rank = { none: 0, small: 1, medium: 2, large: 3, unknown: 0 };
+            if (!t.cluster || rank[lvl] > rank[t.cluster.level]) {
+              t.cluster = { level: lvl, largestPct: m.clusters, totalPct: m.clusters, wallets: null, count: null, source: "bubblemaps" };
+            }
+          }
+        }
+      } catch (e) {
+        t.research.push({ ok: false, text: "🫧 Bubblemaps API: " + describeError(e, "").trim() });
+      }
+    }
     // 𝕏 mentions via the user's own proxy (only when configured — costs credits)
     if (t.research) {
       try {
@@ -1811,9 +1887,14 @@ function tokenCard(t) {
           (t.curve ? '<span>Curve <b>' + (t.curve.complete ? "grad" : t.curve.progress.toFixed(0) + "%") + '</b></span>' : "") +
           (() => { const g = gapScore(t); return g == null ? "" :
             '<span title="Attention (trend+lore) minus priced-in (mcap tier + 24h run). Positive = attention not yet priced in. A present-tense reading, not a prediction.">Gap <b>' + (g > 0 ? "+" : "") + g + '</b></span>'; })() +
-          (t.cluster ? '<span title="Largest group of transfer-linked wallets and its share of supply (Solana, via RugCheck — the same thing a big connected bubble on Bubblemaps shows)">🫧 <b class="' + (t.cluster.level === "large" ? "down" : t.cluster.level === "none" || t.cluster.level === "small" ? "up" : "") + '">' +
+          (t.cluster ? '<span title="' + (t.cluster.source === "bubblemaps"
+              ? "Share of supply held by the top 10 wallet clusters (Bubblemaps Data API)"
+              : "Largest group of transfer-linked wallets and its share of supply (Solana, via RugCheck — the same thing a big connected bubble on Bubblemaps shows)") + '">🫧 <b class="' + (t.cluster.level === "large" ? "down" : t.cluster.level === "none" || t.cluster.level === "small" ? "up" : "") + '">' +
             (t.cluster.level === "none" ? "none" : t.cluster.largestPct.toFixed(1) + "%") + '</b></span>' : "") +
-          (t.cluster && t.cluster.level === "large" ? '<span class="phase ph-dupe" title="' + t.cluster.wallets + ' transfer-linked wallets hold ' + t.cluster.largestPct.toFixed(1) + '% of supply — one entity controlling that much can dump it in a single move. Risk level capped at C.">🫧 BIG CLUSTER</span>' : "") +
+          (t.bm && t.bm.score != null ? '<span title="Bubblemaps decentralization score: 0 = concentrated in few entities, 100 = well distributed">BM <b class="' + (t.bm.score >= 50 ? "up" : t.bm.score < 25 ? "down" : "") + '">' + t.bm.score + '</b></span>' : "") +
+          (t.cluster && t.cluster.level === "large" ? '<span class="phase ph-dupe" title="' + (t.cluster.source === "bubblemaps"
+              ? "The top wallet clusters hold " + t.cluster.largestPct.toFixed(1) + "% of supply (Bubblemaps) — coordinated holders can exit in one move. Risk level capped at C."
+              : t.cluster.wallets + " transfer-linked wallets hold " + t.cluster.largestPct.toFixed(1) + "% of supply — one entity controlling that much can dump it in a single move. Risk level capped at C.") + '">🫧 BIG CLUSTER</span>' : "") +
           (t.xBuzz ? '<span>𝕏 <b>' + t.xBuzz.authors + '</b></span>' : "") +
           (t.xTopic ? '<span title="Accounts tweeting the $TICKER topic — broader than CA mentions, and even more farmable">Topic𝕏 <b>' + t.xTopic.authors + '</b></span>' : "") +
           (t.xPage ? '<span title="The coin&#39;s official X page (@' + esc(t.xPage.handle) + ') follower count">Page <b>' + fmtUsd(t.xPage.followers).replace("$", "") + (t.xPage.verified ? "✓" : "") + '</b></span>' : "") +
@@ -1876,7 +1957,7 @@ function cardBody(t) {
   '<div class="rw">' +
     '<div class="rw-head">Deep research — holders &amp; liquidity (' + t.research.filter((p) => p.ok).length + "/" + t.research.length + ' OK)</div>' +
     t.research.map(sigRow).join("") +
-    (t.chain !== "solana" ? '<div class="rw-note">🫧 Wallet-cluster check is Solana-only (no free cluster data for other chains) — open the Bubblemaps link below and look for one big connected blob.</div>' : "") +
+    (t.chain !== "solana" && !t.bm ? '<div class="rw-note">🫧 No free wallet-cluster data for this chain — add a Bubblemaps API key under ⚙ Advanced, or open the Bubblemaps link below and look for one big connected blob.</div>' : "") +
   '</div>'
   : t.researchError ?
   '<div class="rw"><div class="rw-head">Deep research</div><div class="rw-note">' + esc(t.researchError) + '</div></div>'
@@ -1943,6 +2024,7 @@ function setFunnel(fetched, live, filtered, passed, shown) {
 async function runScan() {
   if (scanning) return;
   scanning = true;
+  bmCreditsOut = false;
   $("scanBtn").disabled = true;
   resultsEl.innerHTML = "";
   setFunnel(null, null, null, null);
@@ -2593,6 +2675,11 @@ for (const id of FIELD_IDS.concat(CHECK_IDS)) $(id).addEventListener("change", (
 try { $("xProxy").value = localStorage.getItem("x-proxy-url") || ""; } catch (e) {}
 $("xProxy").addEventListener("change", () => {
   try { localStorage.setItem("x-proxy-url", $("xProxy").value.trim()); } catch (e) {}
+});
+try { $("bmKey").value = localStorage.getItem("bm-api-key") || ""; } catch (e) {}
+$("bmKey").addEventListener("change", () => {
+  try { localStorage.setItem("bm-api-key", $("bmKey").value.trim()); } catch (e) {}
+  bmCreditsOut = false; // new key — allow calls again
 });
 
 $("recoveryBtn").addEventListener("click", () => { enterMode("recovery"); runScan(); });
